@@ -176,6 +176,7 @@ function errText(e) {
     bad_key: "OpenRouter godkände inte nyckeln. Kontrollera den under Inställningar.",
     no_credits: "Ditt OpenRouter-konto saknar krediter. Fyll på på openrouter.ai.",
     no_model: "Välj en AI-modell under Inställningar först.",
+    model_restricted: "Den valda gratismodellen får bara användas i vissa utvalda appar hos OpenRouter och fungerar inte i Tentquiz. Välj en annan modell under Inställningar.",
     rate_limited: "Gränsen är nådd. Gratismodeller tillåter 50 anrop per dag utan köpta krediter (1 000 per dag om du köpt minst 10 krediter), och kan också vara tillfälligt överbelastade. Vänta en stund, prova en annan gratismodell eller välj en billig betalmodell.",
     too_large: "Materialet är för stort för den valda modellen. Välj en modell med större kontext eller ta bort material.",
     bad_model: "Modellen finns inte hos OpenRouter. Välj en annan under Inställningar.",
@@ -358,19 +359,30 @@ async function pptxText(f) {
 // ---------- AI via OpenRouter
 const getKey = () => ls.get("tp.key") || "";
 const getModel = () => ls.get("tp.model") || DEFAULT_MODEL;
-async function ask(prompt, {json = false, onText, signal} = {}) {
+const restricted = msg => /agentic|only available (on|in|to)|not available for this (app|client)|openrouter\.ai\/apps/i.test(msg || "");
+const badModels = () => { try { return JSON.parse(ls.get("tp.badmodels") || "[]"); } catch (_) { return []; } };
+const markBad = id => ls.set("tp.badmodels", JSON.stringify([...new Set(badModels().concat(id))].slice(-100)));
+async function ask(prompt, opts = {}) {
+  try { return await askRaw(prompt, opts); }
+  catch (e) {
+    // Vald modell visade sig vara spärrad för appar som Tentquiz: göm den och nollställ valet
+    if (e && e.code === "model_restricted" && !opts.model && getModel()) { markBad(getModel()); ls.set("tp.model", null); }
+    throw e;
+  }
+}
+async function askRaw(prompt, {json = false, onText, signal, model} = {}) {
   const key = getKey(); if (!key) throw {code:"no_key"};
-  if (!getModel()) throw {code:"no_model"};
+  if (!model && !getModel()) throw {code:"no_model"};
   let res;
   try {
     res = await fetch(OR_URL + "/chat/completions", {method:"POST", signal,
       headers:{"Authorization":"Bearer " + key, "Content-Type":"application/json", "X-Title":"Tentquiz"},
-      body:JSON.stringify({model:getModel(), stream:true, messages:[{role:"user", content:prompt}]})});
+      body:JSON.stringify({model:model || getModel(), stream:true, messages:[{role:"user", content:prompt}]})});
   } catch (e) { if (e && e.name === "AbortError") throw {code:"cancelled"}; throw {code:"network"}; }
   if (!res.ok) {
     let msg = ""; try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (_) {}
     const s = res.status;
-    throw {code: s === 401 ? "bad_key" : s === 402 ? "no_credits" : s === 429 ? "rate_limited" : /context|too long|maximum.*tokens/i.test(msg) ? "too_large" : /model/i.test(msg) && s === 400 ? "bad_model" : "http", message:msg || ("HTTP " + s)};
+    throw {code: restricted(msg) ? "model_restricted" : s === 401 ? "bad_key" : s === 402 ? "no_credits" : s === 429 ? "rate_limited" : /context|too long|maximum.*tokens/i.test(msg) ? "too_large" : /model/i.test(msg) && (s === 400 || s === 404) ? "bad_model" : "http", message:msg || ("HTTP " + s)};
   }
   const reader = res.body.getReader(), dec = new TextDecoder();
   let buf = "", text = "";
@@ -384,7 +396,7 @@ async function ask(prompt, {json = false, onText, signal} = {}) {
         if (!line.startsWith("data:")) continue;
         const d = line.slice(5).trim(); if (d === "[DONE]") continue;
         let j; try { j = JSON.parse(d); } catch (_) { continue; }
-        if (j.error) throw {code:"http", message:j.error.message || "Fel från modellen"};
+        if (j.error) throw {code:restricted(j.error.message) ? "model_restricted" : "http", message:j.error.message || "Fel från modellen"};
         const delta = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content || "";
         if (delta) { text += delta; if (onText) onText({text, delta}); }
       }
@@ -704,12 +716,28 @@ let modelFilter = "";
 function showModels() {
   const box = byId("mlist"); if (!box || !S.models) return;
   const f = modelFilter.toLowerCase(), freeOnly = ls.get("tp.freeonly") !== "0";
-  const all = S.models.filter(m => (!freeOnly || (!m.inp && !m.out)) && m.ctx >= 32000);
+  const bad = badModels();
+  const all = S.models.filter(m => (!freeOnly || (!m.inp && !m.out)) && m.ctx >= 32000 && !bad.includes(m.id));
   const list = all.filter(m => !f || m.id.toLowerCase().includes(f) || m.name.toLowerCase().includes(f)).slice(0, 60);
   box.innerHTML = `<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
   ${list.length ? `<ul class="files">${list.map(m => `<li><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span><span class="muted small">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
-  <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material.</p>`;
-  const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };  box.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { byId("model").value = b.dataset.m; ls.set("tp.model", b.dataset.m); S.settingsMsg = {text:"Modellen är sparad: " + b.dataset.m}; render(); });
+  <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material. När du väljer en modell testas den direkt${freeOnly ? " (räknas som ett av dina gratisanrop)" : ""}. Modeller som inte fungerar göms.</p>
+  ${bad.length ? `<p class="small"><button class="link muted" id="unhide">Visa ${bad.length} gömda ${bad.length === 1 ? "modell" : "modeller"} igen</button></p>` : ""}`;
+  const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };
+  box.querySelectorAll("[data-m]").forEach(b => b.onclick = () => testModel(b.dataset.m));
+  on("unhide", "click", () => { ls.set("tp.badmodels", null); showModels(); });
+}
+async function testModel(id) {
+  if (!getKey()) { S.settingsMsg = {text:"Spara din OpenRouter-nyckel först.", err:true}; return render(); }
+  S.settingsMsg = {text:"Testar " + id + "…"}; render();
+  try {
+    await ask("Svara bara med ordet OK.", {model:id});
+    ls.set("tp.model", id); S.settingsMsg = {text:"Modellen fungerar och är vald: " + id};
+  } catch (e) {
+    if (e.code === "model_restricted" || e.code === "bad_model") { markBad(id); S.settingsMsg = {text:(e.code === "model_restricted" ? "Den här modellen får bara användas i vissa utvalda appar och fungerar inte i Tentquiz." : "Modellen svarar inte som den ska.") + " Den är nu gömd – välj en annan.", err:true}; }
+    else S.settingsMsg = {text:"Testet misslyckades: " + errText(e) + " Modellen valdes inte.", err:true};
+  }
+  if (S.view === "settings") render();
 }
 
 // ----- tentans inställningar

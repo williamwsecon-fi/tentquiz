@@ -39,7 +39,7 @@ Ungefär så mycket går åt i appen:
 
 50 anrop per dag räcker alltså till ungefär 30–40 omgångar snabbövning, eller några provtentor plus övning.
 
-Tänk också på att gratismodeller ofta är svagare än betalmodeller: frågorna kan bli enklare och oftare innehålla fel (använd knappen *Frågan verkar fel – stryk den*), och essärättningen blir mindre träffsäker. Vilka gratismodeller som finns ändras med tiden – om en modell slutar fungera, välj en annan i listan.
+Tänk också på att gratismodeller ofta är svagare än betalmodeller: frågorna kan bli enklare och oftare innehålla fel (använd knappen *Frågan verkar fel – stryk den*), och essärättningen blir mindre träffsäker. Vilka gratismodeller som finns ändras med tiden – om en modell slutar fungera, välj en annan i listan. Vissa gratismodeller får dessutom bara användas i utvalda appar hos OpenRouter. Tentquiz testar därför varje modell när du väljer den och gömmer de som inte fungerar.
 
 ## Om gratis inte räcker
 
