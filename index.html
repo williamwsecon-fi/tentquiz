@@ -136,6 +136,7 @@ const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.w
 const MAMMOTH = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
 const OR_URL = "https://openrouter.ai/api/v1";
+const VERSION = "1.3 · 19.10.2026";
 const DEFAULT_MODEL = "";
 const PROMPT_MATERIAL = 120000;
 const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
@@ -259,7 +260,14 @@ const S = {
   edit:null, P:null, E:null, banner:null, settingsMsg:null, models:null,
 };
 const blankProgress = () => ({answered:0, correct:0, topics:{}, missed:[], recent:[], sessions:[]});
-const blankState = name => ({version:1, name, examDate:"", info:"", minutes:"", scale:"", parts:[{type:"mc", count:20, plus:1, minus:0}], topics:[], topicsKey:"", progress:blankProgress()});
+const LANGS = {sv:"svenska", fi:"finska", en:"engelska", auto:""};
+const langOf = () => (S.state && S.state.lang) || "sv";
+function langRule(what) {
+  const l = langOf();
+  if (l === "auto") return `SPRÅK: Skriv ${what} på samma språk som huvuddelen av kursmaterialet.`;
+  return `SPRÅK – VIKTIGT: Skriv ${what} på ${LANGS[l]}, även om kursmaterialet eller delar av det är på ett annat språk. Facktermer får anges inom parentes på originalspråket när det hjälper.`;
+}
+const blankState = name => ({version:1, name, lang:"sv", examDate:"", info:"", minutes:"", scale:"", parts:[{type:"mc", count:20, plus:1, minus:0}], topics:[], topicsKey:"", progress:blankProgress()});
 
 let saveT = null;
 function markProgress() { clearTimeout(saveT); saveT = setTimeout(saveState, 1500); }
@@ -468,10 +476,11 @@ Krav:
 - Sant/falskt: ungefär hälften sanna och hälften falska påståenden.
 - Öppna frågor (short, calc, essay) ska kunna besvaras med hjälp av materialet. Räkneuppgifter ska ha alla siffror som behövs och ett entydigt svar.
 - Förklaringar ska vara korta (1–3 meningar).
-- Skriv på samma språk som kursmaterialet.
 
 SVARSFORMAT: Ett JSON-objekt per rad (JSON Lines), inget annat: ingen inledning, inga kodblock, ingen numrering.
-${types.map(t => t + ": " + SHAPES[t]).join("\n")}`;
+${types.map(t => t + ": " + SHAPES[t]).join("\n")}
+
+${langRule("frågor, svarsalternativ, förklaringar och modellsvar")} Värdet i "topic" ska vara exakt ett av ämnesområdena ovan. Nycklarna i JSON (type, q, options …) ska stå kvar som de är.`;
   const got = []; let pending = "";
   const eat = line => { const q = parseQ(line); if (q && got.length < total) { got.push(q); if (onQ) onQ(q); } };
   const res = await ask(prompt, {signal, onText:({delta}) => { const lines = (pending + delta).split("\n"); pending = lines.pop(); lines.forEach(eat); }});
@@ -524,7 +533,8 @@ STUDENTENS SVAR:
 ${answer}
 >>>
 
-Svara med ENDAST ett JSON-objekt på kursmaterialets språk:
+${langRule("feedback och mönstersvar")}
+Svara med ENDAST ett JSON-objekt:
 {"points": poäng mellan 0 och ${max} (halva poäng går bra), "feedback": "2–4 meningar om vad som var bra och vad som saknades", "good": ["det som var rätt"], "missing": ["det som saknades eller var fel"], "model": "ett kort mönstersvar"}`;
   const r = await ask(prompt, {json:true, signal}) || {};
   const pts = Math.max(0, Math.min(max, num(r.points, 0)));
@@ -537,7 +547,8 @@ async function analyzeTopics() {
 ${materialText()}
 >>>
 
-Lista de 6–14 viktigaste ämnesområdena i kursmaterialet ovan, som en student skulle använda för att planera sin tentaläsning. Varje område ska vara 1–4 ord, på materialets språk.
+Lista de 6–14 viktigaste ämnesområdena i kursmaterialet ovan, som en student skulle använda för att planera sin tentaläsning. Varje område ska vara 1–4 ord.
+${langRule("ämnesområdenas namn")}
 Svara med ENDAST en JSON-array av strängar, t.ex. ["Begrepp A","Begrepp B"].`;
   const arr = await ask(prompt, {json:true});
   return (Array.isArray(arr) ? arr : []).map(String).map(s => s.trim()).filter(Boolean).slice(0, 16);
@@ -669,6 +680,7 @@ function renderSettings() {
   const key = getKey(), model = getModel();
   const models = S.models;
   app.innerHTML = `<div class="row between"><button class="link" id="back">← Tillbaka</button></div><h1>Inställningar</h1>
+  ${S.settingsMsg ? `<div class="notice${S.settingsMsg.err ? " err" : " ok"}" id="smsg" role="status">${S.settingsMsg.busy ? '<span class="spin"></span> ' : ""}${esc(S.settingsMsg.text)}</div>` : ""}
   <div class="card"><h2>OpenRouter</h2>
     <p class="small muted">Appen skapar och rättar frågor med en AI-modell via <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>. Skapa ett gratis konto och en nyckel under <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">Keys</a> – med gratismodeller behöver du inte betala något. Nyckeln sparas bara i den här webbläsaren.</p>
     <label>API-nyckel<input id="key" type="password" autocomplete="off" value="${esc(key)}" placeholder="sk-or-…"></label>
@@ -683,7 +695,7 @@ function renderSettings() {
       <div class="stack" style="margin-top:10px"><input id="model" type="text" value="${esc(model)}" autocomplete="off" placeholder="t.ex. leverantör/modell:free">
       <div class="actions"><button class="btn quiet sm" id="savemodel">Spara modell</button></div></div></details>
   </div>
-  ${S.settingsMsg ? `<div class="notice${S.settingsMsg.err ? " err" : " ok"}">${esc(S.settingsMsg.text)}</div>` : ""}`;
+  <p class="muted small">Tentquiz version ${VERSION}</p>`;
   on("back", "click", () => { S.settingsMsg = null; S.view = "home"; render(); top(); });
   on("savekey", "click", () => { const v = byId("key").value.trim(); ls.set("tp.key", v || null); S.settingsMsg = {text:v ? "Nyckeln är sparad i den här webbläsaren." : "Nyckeln är borttagen."}; render(); });
   on("delkey", "click", () => { ls.set("tp.key", null); S.settingsMsg = {text:"Nyckeln är borttagen från den här webbläsaren."}; render(); });
@@ -705,7 +717,7 @@ function renderSettings() {
   else if (!S.modelsLoading) {
     S.modelsLoading = true;
     fetch(OR_URL + "/models").then(r => r.json()).then(d => {
-      S.models = (d.data || []).map(m => ({id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6}))
+      S.models = (d.data || []).filter(m => { const a = m.architecture || {}, o = a.output_modalities, i = a.input_modalities; return (!o || (o.includes("text") && o.length === 1)) && (!i || i.includes("text")) && (!a.modality || /->text$/.test(a.modality)); }).map(m => ({id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6}))
         .sort((a, b) => (a.inp + a.out) - (b.inp + b.out) || b.ctx - a.ctx);
       if (S.view === "settings") showModels();
     }).catch(() => { const box = byId("mlist"); if (box) box.innerHTML = `<p class="notice err">Kunde inte hämta modellistan från OpenRouter. Skriv in modellens id själv nedan.</p>`; })
@@ -729,7 +741,7 @@ function showModels() {
 }
 async function testModel(id) {
   if (!getKey()) { S.settingsMsg = {text:"Spara din OpenRouter-nyckel först.", err:true}; return render(); }
-  S.settingsMsg = {text:"Testar " + id + "…"}; render();
+  S.settingsMsg = {text:"Testar " + id + "…", busy:true}; render(); top();
   try {
     await ask("Svara bara med ordet OK.", {model:id});
     ls.set("tp.model", id); S.settingsMsg = {text:"Modellen fungerar och är vald: " + id};
@@ -737,18 +749,18 @@ async function testModel(id) {
     if (e.code === "model_restricted" || e.code === "bad_model") { markBad(id); S.settingsMsg = {text:(e.code === "model_restricted" ? "Den här modellen får bara användas i vissa utvalda appar och fungerar inte i Tentquiz." : "Modellen svarar inte som den ska.") + " Den är nu gömd – välj en annan.", err:true}; }
     else S.settingsMsg = {text:"Testet misslyckades: " + errText(e) + " Modellen valdes inte.", err:true};
   }
-  if (S.view === "settings") render();
+  if (S.view === "settings") { render(); top(); }
 }
 
 // ----- tentans inställningar
 function startEdit() {
   const st = S.state;
-  S.edit = {c:{name:st.name, examDate:st.examDate, info:st.info, minutes:st.minutes, scale:st.scale, parts:JSON.parse(JSON.stringify(st.parts || []))}, busy:false, msg:null};
+  S.edit = {c:{name:st.name, lang:st.lang || "sv", examDate:st.examDate, info:st.info, minutes:st.minutes, scale:st.scale, parts:JSON.parse(JSON.stringify(st.parts || []))}, busy:false, msg:null};
   S.view = "edit"; render(); top();
 }
 function readForm() {
   const c = S.edit.c;
-  c.name = byId("f-name").value.trim(); c.examDate = byId("f-date").value; c.info = byId("f-info").value;
+  c.name = byId("f-name").value.trim(); c.lang = byId("f-lang").value; c.examDate = byId("f-date").value; c.info = byId("f-info").value;
   c.minutes = byId("f-min").value; c.scale = byId("f-scale").value.trim();
   c.parts = [...app.querySelectorAll(".part")].map(row => {
     const type = row.querySelector(".ptype select").value, pp = num(row.querySelector(".pp").value, 1);
@@ -770,6 +782,7 @@ function renderEdit() {
   <div class="card">
     <label>Namn<input id="f-name" type="text" value="${esc(c.name)}"></label>
     <label>Tentadatum<input id="f-date" type="date" value="${esc(c.examDate)}"></label>
+    <label>Språk för frågorna<select id="f-lang">${[["sv", "Svenska"], ["fi", "Finska"], ["en", "Engelska"], ["auto", "Samma som materialet"]].map(([k, t]) => `<option value="${k}"${(c.lang || "sv") === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>
   </div>
   <div class="card"><h2>Material</h2>
     ${course.kind === "fs" ? `<p class="muted small">Allt i mappen <b>${esc(course.handle.name)}</b> används: PDF, Word (.docx), PowerPoint (.pptx) och textfiler, även i undermappar. Lägg till eller ta bort filer direkt i mappen och tryck på Läs in mappen igen.</p>`
@@ -817,7 +830,7 @@ function renderEdit() {
   });
   on("save", "click", async () => {
     readForm(); if (!c.name) { e.msg = {text:"Ge tentan ett namn.", err:true}; return render(); }
-    Object.assign(S.state, {name:c.name, examDate:c.examDate, info:c.info, minutes:c.minutes, scale:c.scale, parts:c.parts.filter(p => p.count > 0)});
+    Object.assign(S.state, {name:c.name, lang:c.lang, examDate:c.examDate, info:c.info, minutes:c.minutes, scale:c.scale, parts:c.parts.filter(p => p.count > 0)});
     await saveState(); S.edit = null; S.view = "course"; render(); top();
   });
   on("del", "click", () => { readForm(); e.confirmDel = true; render(); });
@@ -845,7 +858,7 @@ function renderCourse() {
   const sessions = (p.sessions || []).slice(-5).reverse();
   const hasMat = mat && mat.length, key = !!getKey() && !!getModel();
   const canGen = hasMat && key && !S.loading;
-  const topicsStale = hasMat && mi && c.topicsKey !== mi.key;
+  const topicsStale = hasMat && mi && c.topicsKey !== mi.key + "|" + langOf();
   app.innerHTML = `<div class="row between"><button class="link" id="back">← Mina tentor</button><button class="link" id="edit">Inställningar för tentan</button></div>
   <div class="stack" style="gap:6px"><h1>${esc(c.name)}</h1>
   <p class="muted">${d !== null ? (d > 1 ? d + " dagar till tentan" : d === 1 ? "Tentan är i morgon" : d === 0 ? "Tentan är i dag" : "Tentan har varit") + " · " : ""}${totalQ(c)} frågor${maxPoints(c) ? " · max " + fmtP(maxPoints(c)) + " p" : ""}${c.minutes ? " · " + c.minutes + " min" : ""}</p></div>
@@ -887,7 +900,7 @@ function renderCourse() {
   on("nobanner", "click", () => { S.banner = null; render(); });
   on("analyze", "click", async () => {
     S.analyzing = true; render();
-    try { const t = await analyzeTopics(); if (S.state === c) { c.topics = t; c.topicsKey = mi.key; await saveState(); } }
+    try { const t = await analyzeTopics(); if (S.state === c) { c.topics = t; c.topicsKey = mi.key + "|" + langOf(); await saveState(); } }
     catch (e) { S.banner = "Kunde inte dela in materialet: " + errText(e); }
     S.analyzing = false; if (S.view === "course") render();
   });
