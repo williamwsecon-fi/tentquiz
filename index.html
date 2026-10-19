@@ -1,0 +1,1178 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tentquiz</title>
+<meta name="description" content="Öva inför tentan med AI-frågor byggda på ditt eget kursmaterial.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231D4FA8'/%3E%3Cpath d='M18 22h28M18 32h20M18 42h24' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+/* Layout: en smal kolumn, ett kort per steg – fungerar lika bra på telefon som dator */
+:root{
+  color-scheme:light;
+  --bg:#EDF1F6; --surface:#FFFFFF; --fg:#13202F; --muted:#5A6878; --line:#D3DBE6;
+  --accent:#1D4FA8; --accent-ink:#FFFFFF; --sel-bg:#DCE6F7; --chip:#E3E9F2;
+  --good:#1D7448; --good-bg:#E3F3EA; --bad:#B42318; --bad-bg:#FBE9E7; --warn:#8A5A00; --warn-bg:#FFF3D6; --skip-bg:#E8ECF2;
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0E151F; --surface:#17212E; --fg:#E6ECF3; --muted:#9AA8B8; --line:#2A3748;
+  --accent:#7FA7F0; --accent-ink:#0E151F; --sel-bg:#1E3050; --chip:#223044;
+  --good:#6FD39C; --good-bg:#14301F; --bad:#FF8A7E; --bad-bg:#3A1A17; --warn:#F2C46B; --warn-bg:#3A2E12; --skip-bg:#222D3B; color-scheme:dark}}
+*{box-sizing:border-box}
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:17px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+[hidden]{display:none!important}
+h1{font-family:var(--display);font-weight:800;font-size:2rem;line-height:1.1;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-family:var(--display);font-weight:600;font-size:1.25rem;line-height:1.3;margin:0;text-wrap:balance}
+h3{font-family:var(--display);font-weight:600;font-size:1.05rem;margin:0}
+p{margin:0}
+a{color:var(--accent)}
+.eyebrow{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.muted{color:var(--muted)} .small{font-size:.9rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.stack{display:flex;flex-direction:column;gap:10px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.score{font-family:var(--display);font-weight:800;font-size:1.5rem}
+.tally{display:flex;gap:10px;color:var(--muted);font-size:.9rem;flex-wrap:wrap}
+.progress{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.progress span{display:block;height:100%;background:var(--accent);transition:width .25s}
+.btn{font:inherit;font-weight:600;border-radius:10px;padding:11px 16px;border:1.5px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer;text-align:center;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn.quiet{background:transparent;border-color:var(--line);color:var(--fg)}
+.btn.danger{background:transparent;border-color:var(--bad);color:var(--bad)}
+.btn.sm{padding:7px 12px;font-size:.92rem}
+.btn:disabled{opacity:.45;cursor:default}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.actions .btn{flex:1 1 auto}
+.link{font:inherit;background:none;border:0;padding:0;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.link.muted{color:var(--muted)}
+.link:disabled{opacity:.45;cursor:default}
+.btn:focus-visible,.opt:focus-visible,.link:focus-visible,.chip:focus-visible,.gq:focus-visible,.course:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+label{font-weight:600;font-size:.95rem;display:flex;flex-direction:column;gap:6px}
+input[type=text],input[type=password],input[type=number],input[type=date],select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;min-width:0}
+textarea{min-height:110px;resize:vertical;line-height:1.45}
+textarea.answer{min-height:160px} textarea.essay{min-height:280px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:420px){.grid2{grid-template-columns:1fr}}
+.part{display:grid;grid-template-columns:minmax(0,2.2fr) repeat(3,minmax(0,1fr)) auto;gap:8px;align-items:end;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.part label{font-size:.8rem;font-weight:600;color:var(--muted)}
+.part .x{align-self:end;margin-bottom:6px}
+@media (max-width:520px){.part{grid-template-columns:repeat(3,minmax(0,1fr)) auto}.part .ptype{grid-column:1/-1}}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{font:inherit;font-size:.92rem;border-radius:999px;padding:7px 13px;border:1.5px solid var(--line);background:var(--chip);color:var(--fg);cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--accent);background:var(--sel-bg);font-weight:600}
+.files{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.files li{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg);border-radius:8px;min-width:0}
+.files .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.opts{display:flex;flex-direction:column;gap:10px}
+.opt{font:inherit;color:var(--fg);text-align:left;background:var(--bg);border:1.5px solid var(--line);border-radius:10px;padding:13px 14px;display:flex;gap:12px;align-items:flex-start;cursor:pointer;width:100%}
+.opt:hover:not(:disabled){border-color:var(--accent)}
+.opt:disabled{cursor:default}
+.opt .k{font-family:var(--display);font-weight:800;color:var(--muted);min-width:1.1em}
+.opt.sel{border-color:var(--accent);background:var(--sel-bg)} .opt.sel .k{color:var(--accent)}
+.opt.right{border-color:var(--good);background:var(--good-bg)} .opt.right .k{color:var(--good)}
+.opt.wrong{border-color:var(--bad);background:var(--bad-bg)} .opt.wrong .k{color:var(--bad)}
+.opt.dim{opacity:.55}
+.tf{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tf .opt{justify-content:center;font-weight:700}
+.fb{border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.fb.good{background:var(--good-bg)} .fb.bad{background:var(--bad-bg)} .fb.skip{background:var(--skip-bg)} .fb.part{background:var(--warn-bg)}
+.fb strong{font-family:var(--display)}
+.fb.good strong{color:var(--good)} .fb.bad strong{color:var(--bad)} .fb.part strong{color:var(--warn)}
+.fb ul{margin:0;padding-left:1.2em}
+.notice{border-radius:10px;padding:12px 14px;background:var(--warn-bg);color:var(--fg)}
+.notice.err{background:var(--bad-bg)}
+.notice.ok{background:var(--good-bg)}
+.big{font-family:var(--display);font-weight:800;font-size:3rem;line-height:1;font-variant-numeric:tabular-nums}
+.grade{font-family:var(--display);font-weight:800;font-size:1.3rem}
+.timer.low{color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px}
+.gq{font:inherit;font-size:.8rem;font-variant-numeric:tabular-nums;padding:7px 0;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+.gq.done{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.gq.cur{outline:2px solid var(--fg);outline-offset:1px}
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.list li{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:4px}
+.list .a{color:var(--good);font-weight:600} .list .y{color:var(--bad);font-weight:600} .list .x{color:var(--muted);font-size:.92rem}
+.course{display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;cursor:pointer;width:100%}
+.course:hover{border-color:var(--accent)}
+.course .t{font-family:var(--display);font-weight:600;font-size:1.2rem}
+.pill{display:inline-block;font-size:.8rem;font-weight:700;border-radius:999px;padding:2px 9px;background:var(--chip);color:var(--muted)}
+.pill.soon{background:var(--warn-bg);color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.stat{background:var(--bg);border-radius:10px;padding:10px 12px}
+.stat b{display:block;font-family:var(--display);font-size:1.4rem;font-variant-numeric:tabular-nums}
+.stat span{font-size:.82rem;color:var(--muted)}
+.topics{display:flex;flex-direction:column;gap:8px}
+.topic{display:grid;grid-template-columns:minmax(0,1fr) 90px auto;gap:10px;align-items:center;font-size:.95rem}
+.topic .nm{min-width:0;overflow-wrap:anywhere}
+.meter{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.meter span{display:block;height:100%;background:var(--good)}
+.meter span.mid{background:var(--warn)} .meter span.low{background:var(--bad)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.progress span{transition:none}.spin{animation:none}}
+.pre{white-space:pre-wrap}
+code{font-size:.9em;background:var(--chip);padding:1px 5px;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p class="eyebrow">Tentquiz</p><h1>Laddar…</h1></div>
+<noscript><p>Tentquiz behöver JavaScript.</p></noscript>
+<script>
+(() => {
+"use strict";
+const app = document.getElementById("app");
+const PDF_LIB = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const MAMMOTH = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+const JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+const OR_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_MODEL = "";
+const PROMPT_MATERIAL = 120000;
+const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
+const MAT_RE = /\.(pdf|docx|pptx|txt|md)$/i;
+const HAS_FS = typeof window.showDirectoryPicker === "function";
+
+const TYPES = {
+  mc:    {label:"Flerval (ett rätt)", short:"Flerval", closed:true},
+  multi: {label:"Flerval (flera rätt)", short:"Flera rätt", closed:true},
+  tf:    {label:"Sant/falskt", short:"Sant/falskt", closed:true},
+  short: {label:"Kortsvar", short:"Kortsvar", closed:false},
+  calc:  {label:"Räkneuppgift", short:"Räkne", closed:false},
+  essay: {label:"Essä", short:"Essä", closed:false},
+};
+const L = "ABCDEF";
+
+// ---------- hjälpare
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const rid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+const shuffle = a => { a = a.slice(); for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; };
+const num = (v, d = 0) => { const n = parseFloat(String(v).replace(",", ".")); return isFinite(n) ? n : d; };
+const fmtP = p => (Math.round(p * 10) / 10).toString().replace(".", ",");
+const signed = p => (p > 0 ? "+" : "") + fmtP(p);
+const byId = id => document.getElementById(id);
+const on = (id, ev, fn) => { const el = byId(id); if (el) el.addEventListener(ev, fn); return el; };
+const top = () => window.scrollTo({top:0});
+const fmtChars = n => n >= 1000 ? Math.round(n / 1000) + " k tecken" : n + " tecken";
+const daysTo = d => { if (!d) return null; const t = new Date(d + "T00:00:00"); if (isNaN(t)) return null; const now = new Date(); now.setHours(0,0,0,0); return Math.round((t - now) / 86400000); };
+const ls = {
+  get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set: (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} },
+};
+
+function errText(e) {
+  const c = e && e.code;
+  return ({
+    no_key: "Lägg in din OpenRouter-nyckel under Inställningar först.",
+    bad_key: "OpenRouter godkände inte nyckeln. Kontrollera den under Inställningar.",
+    no_credits: "Ditt OpenRouter-konto saknar krediter. Fyll på på openrouter.ai.",
+    no_model: "Välj en AI-modell under Inställningar först.",
+    rate_limited: "Gränsen är nådd. Gratismodeller tillåter 50 anrop per dag utan köpta krediter (1 000 per dag om du köpt minst 10 krediter), och kan också vara tillfälligt överbelastade. Vänta en stund, prova en annan gratismodell eller välj en billig betalmodell.",
+    too_large: "Materialet är för stort för den valda modellen. Välj en modell med större kontext eller ta bort material.",
+    bad_model: "Modellen finns inte hos OpenRouter. Välj en annan under Inställningar.",
+    network: "Kunde inte nå OpenRouter. Kontrollera internetanslutningen.",
+    empty: "Inget svar kom tillbaka. Försök igen.",
+    invalid_json: "Svaret gick inte att läsa. Försök igen.",
+    no_permission: "Appen har inte fått tillgång till mappen.",
+  })[c] || ((e && e.message) ? "Fel: " + e.message : "Något gick fel. Försök igen.");
+}
+
+// ---------- IndexedDB (lista över tentor + lagring när mappar inte stöds)
+let dbp = null;
+const idb = () => dbp || (dbp = new Promise((res, rej) => {
+  const r = indexedDB.open("tentquiz", 1);
+  r.onupgradeneeded = () => { r.result.createObjectStore("courses", {keyPath:"id"}); r.result.createObjectStore("blobs"); };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+}));
+const rq = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const store = async (name, mode = "readonly") => (await idb()).transaction(name, mode).objectStore(name);
+const idbGet = async (s, k) => rq((await store(s)).get(k));
+const idbPut = async (s, v, k) => rq((await store(s, "readwrite")).put(v, k));
+const idbDel = async (s, k) => rq((await store(s, "readwrite")).delete(k));
+const idbAll = async s => rq((await store(s)).getAll());
+
+// ---------- lagring per tenta: en mapp (fs) eller webbläsaren (local)
+async function hasPerm(c, askNow) {
+  if (c.kind !== "fs") return true;
+  const o = {mode:"readwrite"};
+  if (!c.handle.queryPermission) return true;
+  if (await c.handle.queryPermission(o) === "granted") return true;
+  if (askNow) return (await c.handle.requestPermission(o)) === "granted";
+  return false;
+}
+async function readJSON(c, name) {
+  if (c.kind === "fs") { try { const fh = await c.handle.getFileHandle(name); return JSON.parse(await (await fh.getFile()).text()); } catch (_) { return null; } }
+  return (await idbGet("blobs", c.id + "#" + name)) || null;
+}
+const writeQ = {};
+function writeJSON(c, name, obj) {
+  const key = c.id + "#" + name, data = JSON.stringify(obj, null, 1);
+  writeQ[key] = (writeQ[key] || Promise.resolve()).then(async () => {
+    if (c.kind === "fs") { const fh = await c.handle.getFileHandle(name, {create:true}); const w = await fh.createWritable(); await w.write(data); await w.close(); }
+    else await idbPut("blobs", JSON.parse(data), key);
+  }).catch(e => { console.warn("write", name, e); S.banner = "Kunde inte spara till " + (c.kind === "fs" ? "mappen" : "webbläsaren") + ". Kontrollera att mappen finns kvar."; });
+  return writeQ[key];
+}
+async function listFiles(c) {
+  const out = [];
+  if (c.kind === "fs") {
+    const walk = async (dir, prefix, depth) => {
+      for await (const [name, h] of dir.entries()) {
+        if (name.startsWith(".") || name.startsWith("~$") || /^tentquiz/i.test(name)) continue;
+        if (h.kind === "file" && MAT_RE.test(name)) { const f = await h.getFile(); out.push({name:prefix + name, size:f.size, lastModified:f.lastModified, get:() => Promise.resolve(f)}); }
+        else if (h.kind === "directory" && depth < 2) await walk(h, prefix + name + "/", depth + 1);
+      }
+    };
+    await walk(c.handle, "", 0);
+  } else {
+    for (const n of c.files || []) { const b = await idbGet("blobs", c.id + "/f/" + n); if (b) out.push({name:n, size:b.size, lastModified:b.lastModified || 0, get:() => Promise.resolve(b)}); }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, "sv", {numeric:true}));
+}
+async function addFiles(c, files) {
+  if (c.kind === "fs") {
+    for (const f of files) { const fh = await c.handle.getFileHandle(f.name, {create:true}); const w = await fh.createWritable(); await w.write(f); await w.close(); }
+  } else {
+    c.files = c.files || [];
+    for (const f of files) { await idbPut("blobs", new File([f], f.name, {type:f.type, lastModified:Date.now()}), c.id + "/f/" + f.name); if (!c.files.includes(f.name)) c.files.push(f.name); }
+    await idbPut("courses", recordOf(c));
+  }
+}
+async function removeLocalFile(c, name) {
+  await idbDel("blobs", c.id + "/f/" + name); c.files = (c.files || []).filter(n => n !== name); await idbPut("courses", recordOf(c));
+}
+const recordOf = c => ({id:c.id, kind:c.kind, name:c.name, handle:c.handle, files:c.files, added:c.added});
+
+// ---------- tillstånd
+const S = {
+  courses:[], view:"home", course:null, state:null, material:null, matInfo:null, loading:false,
+  edit:null, P:null, E:null, banner:null, settingsMsg:null, models:null,
+};
+const blankProgress = () => ({answered:0, correct:0, topics:{}, missed:[], recent:[], sessions:[]});
+const blankState = name => ({version:1, name, examDate:"", info:"", minutes:"", scale:"", parts:[{type:"mc", count:20, plus:1, minus:0}], topics:[], topicsKey:"", progress:blankProgress()});
+
+let saveT = null;
+function markProgress() { clearTimeout(saveT); saveT = setTimeout(saveState, 1500); }
+function saveState() { clearTimeout(saveT); saveT = null; if (S.course && S.state) return writeJSON(S.course, STATE_FILE, S.state); return Promise.resolve(); }
+
+async function loadCourses() {
+  const recs = await idbAll("courses").catch(() => []);
+  S.courses = recs.sort((a, b) => (b.added || 0) - (a.added || 0));
+  for (const c of S.courses) { c.ok = await hasPerm(c, false).catch(() => false); if (c.ok) { const st = await readJSON(c, STATE_FILE); if (st) c.meta = st; } }
+}
+
+async function openCourse(c) {
+  await saveState();
+  if (!(await hasPerm(c, true).catch(() => false))) { S.banner = "Utan tillgång till mappen kan appen inte läsa materialet."; return render(); }
+  c.ok = true;
+  S.course = c; S.state = null; S.material = null; S.view = "course"; S.loading = "Läser kursens fil…"; render(); top();
+  let st = await readJSON(c, STATE_FILE);
+  if (!st) { st = blankState(c.name); await writeJSON(c, STATE_FILE, st); }
+  st.progress = {...blankProgress(), ...(st.progress || {})};
+  S.state = st; c.meta = st;
+  await loadMaterial();
+}
+async function loadMaterial() {
+  const c = S.course;
+  S.loading = "Läser materialet…"; if (S.view === "course") render();
+  let files = [];
+  try { files = await listFiles(c); } catch (e) { S.banner = "Kunde inte läsa mappen. Har den flyttats eller tagits bort?"; S.loading = false; S.material = []; return render(); }
+  const cache = (await readJSON(c, CACHE_FILE)) || {files:{}};
+  const fresh = {}, errs = [];
+  let changed = false, i = 0;
+  for (const f of files) {
+    i++;
+    const key = f.name + "|" + f.size + "|" + f.lastModified;
+    if (cache.files[key]) { fresh[key] = cache.files[key]; continue; }
+    S.loading = `Läser ${f.name} (${i} av ${files.length})…`; if (S.view === "course") render();
+    try { const text = (await extract(await f.get(), f.name)).trim(); fresh[key] = {name:f.name, text}; if (text.length < 20) errs.push(f.name + " (ingen text – är det en skannad bild?)"); }
+    catch (e) { console.warn(e); errs.push(f.name); fresh[key] = {name:f.name, text:"", failed:true}; }
+    changed = true;
+  }
+  if (Object.keys(cache.files).some(k => !fresh[k])) changed = true;
+  if (changed) await writeJSON(c, CACHE_FILE, {files:fresh});
+  S.material = Object.values(fresh).filter(m => m.text);
+  S.matInfo = {files:files.map(f => ({name:f.name, chars:(fresh[f.name + "|" + f.size + "|" + f.lastModified] || {}).text?.length || 0})), key:Object.keys(fresh).sort().join(";"), errs};
+  if (errs.length) S.banner = "Kunde inte läsa text ur: " + errs.join(", ");
+  S.loading = false;
+  if (S.view === "course" || S.view === "edit") render();
+}
+
+// ---------- filer till text
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const ex = document.querySelector(`script[data-src="${src}"]`);
+    if (ex) { if (ex.dataset.ok) return res(); ex.addEventListener("load", res); ex.addEventListener("error", rej); return; }
+    const s = document.createElement("script"); s.src = src; s.dataset.src = src;
+    s.onload = () => { s.dataset.ok = "1"; res(); }; s.onerror = () => rej(new Error("Kunde inte ladda " + src));
+    document.head.appendChild(s);
+  });
+}
+async function extract(f, name) {
+  const n = (name || f.name || "").toLowerCase();
+  if (n.endsWith(".pdf")) return pdfText(f);
+  if (n.endsWith(".docx")) { await loadScript(MAMMOTH); return (await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value; }
+  if (n.endsWith(".pptx")) return pptxText(f);
+  return f.text();
+}
+async function pdfText(f) {
+  await loadScript(PDF_WORKER); await loadScript(PDF_LIB);
+  const doc = await window.pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer()), isEvalSupported:false, disableFontFace:true}).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    let s = "", lastY = null;
+    for (const it of tc.items) {
+      if (!("str" in it)) continue;
+      const y = it.transform ? it.transform[5] : null;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) s += "\n"; else if (s && !/\s$/.test(s) && it.str && !/^\s/.test(it.str)) s += " ";
+      s += it.str; if (it.hasEOL) s += "\n"; lastY = y;
+    }
+    pages.push(s.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim());
+  }
+  return pages.filter(Boolean).join("\n\n");
+}
+async function pptxText(f) {
+  await loadScript(JSZIP);
+  const zip = await window.JSZip.loadAsync(await f.arrayBuffer());
+  const slides = Object.keys(zip.files).filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+  const dec = s => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  const out = [];
+  for (const k of slides) {
+    const xml = await zip.file(k).async("string");
+    const paras = xml.split(/<\/a:p>/).map(p => [...p.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => dec(m[1])).join("")).filter(t => t.trim());
+    if (paras.length) out.push(paras.join("\n"));
+  }
+  return out.join("\n\n");
+}
+
+// ---------- AI via OpenRouter
+const getKey = () => ls.get("tp.key") || "";
+const getModel = () => ls.get("tp.model") || DEFAULT_MODEL;
+async function ask(prompt, {json = false, onText, signal} = {}) {
+  const key = getKey(); if (!key) throw {code:"no_key"};
+  if (!getModel()) throw {code:"no_model"};
+  let res;
+  try {
+    res = await fetch(OR_URL + "/chat/completions", {method:"POST", signal,
+      headers:{"Authorization":"Bearer " + key, "Content-Type":"application/json", "X-Title":"Tentquiz"},
+      body:JSON.stringify({model:getModel(), stream:true, messages:[{role:"user", content:prompt}]})});
+  } catch (e) { if (e && e.name === "AbortError") throw {code:"cancelled"}; throw {code:"network"}; }
+  if (!res.ok) {
+    let msg = ""; try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (_) {}
+    const s = res.status;
+    throw {code: s === 401 ? "bad_key" : s === 402 ? "no_credits" : s === 429 ? "rate_limited" : /context|too long|maximum.*tokens/i.test(msg) ? "too_large" : /model/i.test(msg) && s === 400 ? "bad_model" : "http", message:msg || ("HTTP " + s)};
+  }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", text = "";
+  try {
+    for (;;) {
+      const {value, done} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const d = line.slice(5).trim(); if (d === "[DONE]") continue;
+        let j; try { j = JSON.parse(d); } catch (_) { continue; }
+        if (j.error) throw {code:"http", message:j.error.message || "Fel från modellen"};
+        const delta = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content || "";
+        if (delta) { text += delta; if (onText) onText({text, delta}); }
+      }
+    }
+  } catch (e) { if (e && e.name === "AbortError") throw {code:"cancelled", text}; throw e.code ? e : {code:"network"}; }
+  if (!text.trim()) throw {code:"empty"};
+  if (!json) return {text};
+  const v = looseJSON(text); if (v === undefined) throw {code:"invalid_json", text};
+  return v;
+}
+function looseJSON(t) {
+  const tries = [t.trim()];
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (fence) tries.push(fence[1].trim());
+  const a = t.search(/[\[{]/), b = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]")); if (a >= 0 && b > a) tries.push(t.slice(a, b + 1));
+  for (const s of tries) { try { return JSON.parse(s); } catch (_) {} }
+  return undefined;
+}
+function materialText(max = PROMPT_MATERIAL) {
+  const full = (S.material || []).map(m => "### " + m.name + "\n" + m.text).join("\n\n");
+  if (full.length <= max) return full;
+  const start = Math.floor(Math.random() * (full.length - max));
+  return "[Slumpat utdrag ur ett längre material]\n" + full.slice(start, start + max);
+}
+function formatText(c) {
+  const parts = (c.parts || []).map(p => TYPES[p.type] ? `- ${p.count} st ${TYPES[p.type].label}` + (TYPES[p.type].closed ? ` (rätt +${fmtP(p.plus)} p, fel −${fmtP(p.minus)} p)` : ` (max ${fmtP(p.points)} p per fråga)`) : "").join("\n");
+  return (parts || "- okänt") + (c.minutes ? `\nSkrivtid: ${c.minutes} min` : "") + (c.scale ? `\nVitsordsskala: ${c.scale}` : "");
+}
+const SHAPES = {
+  mc: '{"type":"mc","topic":"...","q":"frågan","options":["A","B","C","D"],"correct":0,"explanation":"varför rätt svar är rätt och var i materialet det står"}',
+  multi: '{"type":"multi","topic":"...","q":"frågan (ange att flera kan vara rätt)","options":["A","B","C","D","E"],"correct":[0,3],"explanation":"..."}',
+  tf: '{"type":"tf","topic":"...","q":"ett påstående","answer":true,"explanation":"..."}',
+  short: '{"type":"short","topic":"...","q":"frågan","answer":"modellsvar, 1–4 meningar","points":2}',
+  calc: '{"type":"calc","topic":"...","q":"uppgiften med alla siffror som behövs","answer":"slutsvaret","solution":"lösningen steg för steg","points":4}',
+  essay: '{"type":"essay","topic":"...","q":"essäfrågan","points":10,"guidance":["bedömningspunkt 1","bedömningspunkt 2"],"answer":"modellsvar i punktform"}',
+};
+const partFor = type => (S.state.parts || []).find(p => p.type === type);
+const defaultPoints = type => { const p = partFor(type); return (p && num(p.points, 0)) || (type === "essay" ? 10 : type === "calc" ? 4 : 2); };
+
+async function generate({spec, topic, focus, signal, onQ}) {
+  const c = S.state, prog = c.progress;
+  const total = spec.reduce((s, x) => s + x.n, 0);
+  const recent = (prog.recent || []).slice(-70).map(s => "- " + s.slice(0, 140)).join("\n");
+  const topics = (c.topics || []).length ? c.topics.join("; ") : "";
+  const types = [...new Set(spec.map(x => x.type))];
+  const prompt =
+`KURSMATERIAL:
+<<<
+${materialText()}
+>>>
+
+Du skapar övningsfrågor inför en universitetstenta i kursen "${c.name}". Allt ska bygga på kursmaterialet ovan. Hitta inte på fakta som materialet inte stöder.
+
+OM TENTAN (från läraren):
+${c.info || "(ingen information)"}
+
+TENTANS UPPLÄGG:
+${formatText(c)}
+${topics ? "\nÄMNESOMRÅDEN (använd exakt ett av dessa som topic): " + topics : ""}
+${topic ? "\nFOKUS: Alla frågor ska handla om ämnesområdet: " + topic : ""}${focus ? "\nFOKUS: Studenten behöver öva mest på: " + focus + ". Låt de flesta frågor handla om detta." : ""}
+
+UPPGIFT: Skapa exakt ${total} nya frågor:
+${spec.map(x => `- ${x.n} st av typen ${x.type} (${TYPES[x.type].label})`).join("\n")}
+${recent ? "\nUpprepa inte dessa frågor som studenten redan fått:\n" + recent : ""}
+
+Krav:
+- Frågorna ska likna riktiga tentafrågor i den här kursen och testa förståelse och tillämpning av centrala begrepp och regler. Undvik triviala detaljer som årtal, belopp eller namn på enskilda fall, om materialet inte uttryckligen betonar dem.
+- Felaktiga alternativ ska vara rimliga och bygga på typiska missförstånd. Undvik "alla ovanstående" och "inget av ovanstående".
+- Variera vilket alternativ som är rätt. Rätt svar ska vara entydigt enligt materialet.
+- Sant/falskt: ungefär hälften sanna och hälften falska påståenden.
+- Öppna frågor (short, calc, essay) ska kunna besvaras med hjälp av materialet. Räkneuppgifter ska ha alla siffror som behövs och ett entydigt svar.
+- Förklaringar ska vara korta (1–3 meningar).
+- Skriv på samma språk som kursmaterialet.
+
+SVARSFORMAT: Ett JSON-objekt per rad (JSON Lines), inget annat: ingen inledning, inga kodblock, ingen numrering.
+${types.map(t => t + ": " + SHAPES[t]).join("\n")}`;
+  const got = []; let pending = "";
+  const eat = line => { const q = parseQ(line); if (q && got.length < total) { got.push(q); if (onQ) onQ(q); } };
+  const res = await ask(prompt, {signal, onText:({delta}) => { const lines = (pending + delta).split("\n"); pending = lines.pop(); lines.forEach(eat); }});
+  if (pending.trim()) eat(pending);
+  if (!got.length && res && res.text) { const v = looseJSON(res.text); if (Array.isArray(v)) v.forEach(o => eat(JSON.stringify(o))); }
+  return got;
+}
+function parseQ(line) {
+  line = String(line || "").trim().replace(/^```\w*/, "").replace(/```$/, "").replace(/,\s*$/, "").trim();
+  if (!line.startsWith("{")) return null;
+  let o; try { o = JSON.parse(line); } catch (_) { return null; }
+  if (!o || !TYPES[o.type] || typeof o.q !== "string" || !o.q.trim()) return null;
+  const q = {id:rid(), type:o.type, topic:String(o.topic || "Övrigt").slice(0, 80), q:o.q.trim(), explanation:String(o.explanation || "")};
+  if (o.type === "mc" || o.type === "multi") {
+    if (!Array.isArray(o.options) || o.options.length < 2 || o.options.length > 6) return null;
+    q.options = o.options.map(String);
+    if (o.type === "mc") { const c = parseInt(o.correct, 10); if (!(c >= 0 && c < q.options.length)) return null; q.correct = c; }
+    else { const cs = (Array.isArray(o.correct) ? o.correct : [o.correct]).map(x => parseInt(x, 10)).filter(c => c >= 0 && c < q.options.length); if (!cs.length) return null; q.correct = [...new Set(cs)].sort(); }
+    q.perm = shuffle(q.options.map((_, k) => k));
+  } else if (o.type === "tf") {
+    const a = o.answer; const v = a === true || /^(true|sant)$/i.test(a) ? true : a === false || /^(false|falskt)$/i.test(a) ? false : null;
+    if (v === null) return null; q.answer = v;
+  } else {
+    q.answer = String(o.answer || ""); q.solution = String(o.solution || "");
+    q.guidance = Array.isArray(o.guidance) ? o.guidance.map(String) : [];
+    q.points = num(o.points, 0) || defaultPoints(o.type);
+  }
+  return q;
+}
+async function gradeOpen(q, answer, max, signal) {
+  if (!String(answer || "").trim()) return {points:0, max, feedback:"Inget svar.", good:[], missing:[], model:q.answer || q.solution || ""};
+  const prompt =
+`KURSMATERIAL (för kontroll):
+<<<
+${materialText()}
+>>>
+
+Du rättar ett svar på en tentafråga i kursen "${S.state.name}", som en noggrann men rättvis lärare. Bedöm innehållet mot kursmaterialet och modellsvaret. Språkfel ska inte dra ner poängen om innehållet är rätt.
+
+FRÅGA (${TYPES[q.type].label}, max ${max} p):
+${q.q}
+
+MODELLSVAR:
+${q.answer || "-"}
+${q.solution ? "\nLÖSNING:\n" + q.solution : ""}
+${q.guidance && q.guidance.length ? "\nBEDÖMNINGSPUNKTER:\n- " + q.guidance.join("\n- ") : ""}
+
+STUDENTENS SVAR:
+<<<
+${answer}
+>>>
+
+Svara med ENDAST ett JSON-objekt på kursmaterialets språk:
+{"points": poäng mellan 0 och ${max} (halva poäng går bra), "feedback": "2–4 meningar om vad som var bra och vad som saknades", "good": ["det som var rätt"], "missing": ["det som saknades eller var fel"], "model": "ett kort mönstersvar"}`;
+  const r = await ask(prompt, {json:true, signal}) || {};
+  const pts = Math.max(0, Math.min(max, num(r.points, 0)));
+  return {points:Math.round(pts * 2) / 2, max, feedback:String(r.feedback || ""), good:(r.good || []).map(String), missing:(r.missing || []).map(String), model:String(r.model || q.answer || "")};
+}
+async function analyzeTopics() {
+  const prompt =
+`KURSMATERIAL:
+<<<
+${materialText()}
+>>>
+
+Lista de 6–14 viktigaste ämnesområdena i kursmaterialet ovan, som en student skulle använda för att planera sin tentaläsning. Varje område ska vara 1–4 ord, på materialets språk.
+Svara med ENDAST en JSON-array av strängar, t.ex. ["Begrepp A","Begrepp B"].`;
+  const arr = await ask(prompt, {json:true});
+  return (Array.isArray(arr) ? arr : []).map(String).map(s => s.trim()).filter(Boolean).slice(0, 16);
+}
+async function parseFormat(text) {
+  return ask(`Läs informationen om en tenta nedan och fyll i upplägget.
+Svara med ENDAST ett JSON-objekt:
+{"parts":[{"type":"mc|multi|tf|short|calc|essay","count":antal frågor,"plus":poäng för rätt svar (bara mc/multi/tf),"minus":avdrag för fel svar som positivt tal, 0 om inget avdrag (bara mc/multi/tf),"points":maxpoäng per fråga (bara short/calc/essay)}],"minutes":skrivtid i minuter eller null,"scale":"vitsordsskalan som text, t.ex. 50-59=1, 60-69=2" eller null}
+Typer: mc = flerval med ett rätt svar ("flervals" utan mer info betyder mc), multi = flerval med flera rätta, tf = sant/falskt, short = kortsvarsfrågor, calc = räkneuppgifter, essay = essäfrågor.
+Ta bara med det som går att utläsa ur texten.
+
+TEXT:
+<<<
+${text}
+>>>`, {json:true});
+}
+
+// ---------- poäng
+function scaleRows(txt) {
+  const rows = [], re = /(\d+(?:[.,]\d+)?)\s*(?:-|–|—|till)\s*(\d+(?:[.,]\d+)?)\s*(?:p(?:oäng)?\.?)?\s*(?:=|:|→|->)\s*([^\s,;]+)/gi;
+  let m; while ((m = re.exec(txt || ""))) rows.push({min:num(m[1]), max:num(m[2]), g:m[3]});
+  return rows.sort((a, b) => b.min - a.min);
+}
+function gradeFor(p, txt) {
+  const rows = scaleRows(txt); if (!rows.length) return null;
+  for (const r of rows) if (p >= r.min) return "Vitsord " + r.g;
+  return "Underkänt (gränsen är " + fmtP(rows[rows.length - 1].min) + " p)";
+}
+function scoring(type) { const p = partFor(type); return p ? {plus:num(p.plus, 1), minus:num(p.minus, 0)} : {plus:1, minus:0}; }
+const maxPoints = c => (c.parts || []).reduce((s, p) => s + num(p.count) * (TYPES[p.type] && TYPES[p.type].closed ? num(p.plus, 1) : num(p.points, 0)), 0);
+const totalQ = c => (c.parts || []).reduce((s, p) => s + num(p.count), 0);
+function checkClosed(q, a) {
+  if (a === null || a === undefined || (Array.isArray(a) && !a.length)) return null;
+  if (q.type === "mc") return a === q.correct;
+  if (q.type === "tf") return a === q.answer;
+  if (q.type === "multi") return [...a].sort().join(",") === q.correct.join(",");
+  return null;
+}
+function correctText(q) {
+  if (q.type === "mc") return q.options[q.correct];
+  if (q.type === "multi") return q.correct.map(k => q.options[k]).join(" · ");
+  if (q.type === "tf") return q.answer ? "Sant" : "Falskt";
+  return q.answer || q.solution || "";
+}
+function answerText(q, a) {
+  if (a === null || a === undefined) return "";
+  if (q.type === "mc") return q.options[a];
+  if (q.type === "multi") return a.map(k => q.options[k]).join(" · ");
+  if (q.type === "tf") return a ? "Sant" : "Falskt";
+  return String(a);
+}
+
+// ---------- statistik
+const prog = () => S.state && S.state.progress;
+function record(q, ok, partial) {
+  const p = prog(); if (!p) return;
+  p.answered++; if (ok) p.correct++;
+  const t = q.topic || "Övrigt"; p.topics[t] = p.topics[t] || {r:0, w:0};
+  if (ok) p.topics[t].r++; else p.topics[t].w++;
+  const key = q.q.slice(0, 200);
+  p.missed = (p.missed || []).filter(m => m.q.slice(0, 200) !== key);
+  if (!ok && !partial) { const c = JSON.parse(JSON.stringify(q)); delete c.perm; p.missed.push(c); if (p.missed.length > 150) p.missed = p.missed.slice(-150); }
+  markProgress();
+}
+function noteAsked(q) { const p = prog(); if (!p) return; p.recent = (p.recent || []).concat(q.q.slice(0, 160)).slice(-120); markProgress(); }
+function addSession(s) { const p = prog(); if (!p) return; p.sessions = (p.sessions || []).concat({at:Date.now(), ...s}).slice(-60); markProgress(); }
+function weakTopics() {
+  const t = (prog() && prog().topics) || {};
+  return Object.entries(t).map(([k, v]) => ({k, n:v.r + v.w, acc:v.r / Math.max(1, v.r + v.w)})).filter(x => x.n >= 3).sort((a, b) => a.acc - b.acc);
+}
+
+// ---------- vyer
+function render() {
+  const v = S.view;
+  if (v === "home") return renderHome();
+  if (v === "settings") return renderSettings();
+  if (v === "edit") return renderEdit();
+  if (v === "course") return renderCourse();
+  if (v === "practice") return renderPractice();
+  if (v === "exam") return renderExam();
+}
+
+function renderHome() {
+  const key = getKey();
+  app.innerHTML = `<div class="row between"><p class="eyebrow">Tentquiz</p><button class="link" id="settings">Inställningar</button></div>
+  <h1>Mina tentor</h1>
+  ${S.banner ? `<div class="notice">${esc(S.banner)} <button class="link" id="nobanner">Stäng</button></div>` : ""}
+  ${!key || !getModel() ? `<div class="notice">${!key ? "Appen använder din egen nyckel från OpenRouter för att skapa och rätta frågor." : "Välj vilken AI-modell appen ska använda."} <button class="link" id="settings2">${!key ? "Lägg in nyckeln" : "Välj modell"}</button></div>` : ""}
+  ${S.courses.length ? `<div class="stack">${S.courses.map(c => {
+      const m = c.meta || {}, d = daysTo(m.examDate), pr = m.progress || {};
+      return `<button class="course" data-id="${esc(c.id)}"><span class="row between"><span class="t">${esc(m.name || c.name)}</span>${d !== null ? `<span class="pill${d >= 0 && d <= 7 ? " soon" : ""}">${d > 1 ? d + " dagar kvar" : d === 1 ? "I morgon" : d === 0 ? "I dag" : "Har varit"}</span>` : ""}</span>
+      <span class="muted small">${c.kind === "fs" ? "Mapp: " + esc(c.handle.name) : "Sparad i webbläsaren"}${!c.ok ? " · tryck för att ge åtkomst" : ""}${pr.answered ? " · " + pr.answered + " besvarade, " + Math.round(100 * pr.correct / pr.answered) + " % rätt" : ""}</span></button>`; }).join("")}</div>`
+  : `<div class="card"><h2>Kom igång</h2>
+    <p>Varje tenta har en egen mapp på datorn. Lägg föreläsningsbilder, anteckningar och kompendier i mappen (PDF, Word, PowerPoint eller text). Appen läser allt i mappen och skapar övningsfrågor i samma stil som tentan.</p>
+    <ul class="small muted" style="margin:0;padding-left:1.2em"><li>Flerval, sant/falskt, kortsvar, räkneuppgifter och essäer</li><li>Provtenta med tid, minuspoäng och vitsord</li><li>Rättning och feedback på öppna svar</li><li>Repetition av det du missat och statistik per ämne</li></ul>
+    <p class="small muted">Appen sparar inställningar och statistik i filen <code>tentquiz.json</code> i varje tentamapp.</p></div>`}
+  <div class="actions">${HAS_FS ? `<button class="btn" id="addfs">Lägg till tentamapp</button>` : ""}<button class="btn ${HAS_FS ? "quiet" : ""}" id="addlocal">${HAS_FS ? "Ny tenta utan mapp" : "Ny tenta"}</button></div>
+  ${!HAS_FS ? `<p class="muted small">Den här webbläsaren kan inte öppna mappar, så tentorna sparas i webbläsaren. Använd Chrome eller Edge på en dator för att jobba med mappar.</p>` : `<p class="muted small">Välj en befintlig mapp med kursmaterial, eller skapa en ny mapp i dialogen.</p>`}
+  <div id="newlocal"></div>`;
+  app.querySelectorAll(".course").forEach(b => b.onclick = () => openCourse(S.courses.find(c => c.id === b.dataset.id)));
+  on("settings", "click", () => { S.view = "settings"; render(); top(); });
+  on("settings2", "click", () => { S.view = "settings"; render(); top(); });
+  on("nobanner", "click", () => { S.banner = null; render(); });
+  on("addfs", "click", addFsCourse);
+  on("addlocal", "click", () => {
+    byId("newlocal").innerHTML = `<div class="card"><label>Tentans namn<input id="lname" type="text" placeholder="T.ex. Extern redovisning I"></label><div class="actions"><button class="btn" id="lcreate">Skapa</button></div></div>`;
+    byId("lname").focus();
+    on("lcreate", "click", async () => {
+      const name = byId("lname").value.trim(); if (!name) return byId("lname").focus();
+      const c = {id:"l_" + rid(), kind:"local", name, files:[], added:Date.now(), ok:true};
+      await idbPut("courses", recordOf(c)); await writeJSON(c, STATE_FILE, blankState(name));
+      S.courses.unshift(c); await openCourse(c); startEdit();
+    });
+  });
+}
+async function addFsCourse() {
+  let h;
+  try { h = await window.showDirectoryPicker({id:"tentquiz", mode:"readwrite"}); } catch (e) { return; }
+  for (const c of S.courses) if (c.kind === "fs" && await c.handle.isSameEntry(h).catch(() => false)) return openCourse(c);
+  const c = {id:"f_" + rid(), kind:"fs", name:h.name, handle:h, added:Date.now(), ok:true};
+  await idbPut("courses", recordOf(c));
+  S.courses.unshift(c);
+  const existing = await readJSON(c, STATE_FILE);
+  await openCourse(c);
+  if (!existing) startEdit();
+}
+
+function renderSettings() {
+  const key = getKey(), model = getModel();
+  const models = S.models;
+  app.innerHTML = `<div class="row between"><button class="link" id="back">← Tillbaka</button></div><h1>Inställningar</h1>
+  <div class="card"><h2>OpenRouter</h2>
+    <p class="small muted">Appen skapar och rättar frågor med en AI-modell via <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>. Skapa ett gratis konto och en nyckel under <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">Keys</a> – med gratismodeller behöver du inte betala något. Nyckeln sparas bara i den här webbläsaren.</p>
+    <label>API-nyckel<input id="key" type="password" autocomplete="off" value="${esc(key)}" placeholder="sk-or-…"></label>
+    <div class="actions"><button class="btn" id="savekey">Spara nyckeln</button>${key ? `<button class="btn quiet" id="testkey">Testa nyckeln</button><button class="btn danger" id="delkey">Ta bort</button>` : ""}</div>
+  </div>
+  <div class="card"><h2>Modell</h2>
+    <p class="small muted">Börja gärna med en gratismodell (slutar på <code>:free</code>). De är begränsade till 50 anrop per dag utan köpta krediter och kan ibland vara överbelastade. Räcker det inte, välj en billig betalmodell. Starkare modeller ger bättre frågor och essärättning men kostar mer.</p>
+    <p>Vald modell: <b>${model ? esc(model) : "ingen ännu"}</b></p>
+    <label class="row" style="flex-direction:row;font-weight:600"><input id="freeonly" type="checkbox"${ls.get("tp.freeonly") !== "0" ? " checked" : ""}> Visa bara gratismodeller</label>
+    <div id="mlist">${models ? "" : `<p class="muted small"><span class="spin"></span> Hämtar modeller från OpenRouter…</p>`}</div>
+    <details><summary class="small" style="cursor:pointer">Skriv in modellens id själv</summary>
+      <div class="stack" style="margin-top:10px"><input id="model" type="text" value="${esc(model)}" autocomplete="off" placeholder="t.ex. leverantör/modell:free">
+      <div class="actions"><button class="btn quiet sm" id="savemodel">Spara modell</button></div></div></details>
+  </div>
+  ${S.settingsMsg ? `<div class="notice${S.settingsMsg.err ? " err" : " ok"}">${esc(S.settingsMsg.text)}</div>` : ""}`;
+  on("back", "click", () => { S.settingsMsg = null; S.view = "home"; render(); top(); });
+  on("savekey", "click", () => { const v = byId("key").value.trim(); ls.set("tp.key", v || null); S.settingsMsg = {text:v ? "Nyckeln är sparad i den här webbläsaren." : "Nyckeln är borttagen."}; render(); });
+  on("delkey", "click", () => { ls.set("tp.key", null); S.settingsMsg = {text:"Nyckeln är borttagen från den här webbläsaren."}; render(); });
+  on("testkey", "click", async () => {
+    S.settingsMsg = {text:"Testar…"}; render();
+    try {
+      const r = await fetch(OR_URL + "/key", {headers:{Authorization:"Bearer " + getKey()}});
+      if (!r.ok) throw new Error(r.status === 401 ? "Nyckeln godkändes inte." : "HTTP " + r.status);
+      const d = (await r.json()).data || {};
+      const used = d.usage != null ? " Använt hittills: $" + Number(d.usage).toFixed(2) + "." : "";
+      const left = d.limit_remaining != null ? " Kvar av gränsen: $" + Number(d.limit_remaining).toFixed(2) + "." : "";
+      S.settingsMsg = {text:"Nyckeln fungerar." + used + left};
+    } catch (e) { S.settingsMsg = {text:e.message || "Kunde inte nå OpenRouter.", err:true}; }
+    render();
+  });
+  on("savemodel", "click", () => { const v = byId("model").value.trim(); ls.set("tp.model", v || null); S.settingsMsg = {text:v ? "Modellen är sparad: " + v : "Ingen modell vald."}; render(); });
+  on("freeonly", "change", ev => { ls.set("tp.freeonly", ev.target.checked ? "1" : "0"); showModels(); });
+  if (S.models) showModels();
+  else if (!S.modelsLoading) {
+    S.modelsLoading = true;
+    fetch(OR_URL + "/models").then(r => r.json()).then(d => {
+      S.models = (d.data || []).map(m => ({id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6}))
+        .sort((a, b) => (a.inp + a.out) - (b.inp + b.out) || b.ctx - a.ctx);
+      if (S.view === "settings") showModels();
+    }).catch(() => { const box = byId("mlist"); if (box) box.innerHTML = `<p class="notice err">Kunde inte hämta modellistan från OpenRouter. Skriv in modellens id själv nedan.</p>`; })
+      .finally(() => { S.modelsLoading = false; });
+  }
+}
+let modelFilter = "";
+function showModels() {
+  const box = byId("mlist"); if (!box || !S.models) return;
+  const f = modelFilter.toLowerCase(), freeOnly = ls.get("tp.freeonly") !== "0";
+  const all = S.models.filter(m => (!freeOnly || (!m.inp && !m.out)) && m.ctx >= 32000);
+  const list = all.filter(m => !f || m.id.toLowerCase().includes(f) || m.name.toLowerCase().includes(f)).slice(0, 60);
+  box.innerHTML = `<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
+  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span><span class="muted small">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
+  <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material.</p>`;
+  const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };  box.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { byId("model").value = b.dataset.m; ls.set("tp.model", b.dataset.m); S.settingsMsg = {text:"Modellen är sparad: " + b.dataset.m}; render(); });
+}
+
+// ----- tentans inställningar
+function startEdit() {
+  const st = S.state;
+  S.edit = {c:{name:st.name, examDate:st.examDate, info:st.info, minutes:st.minutes, scale:st.scale, parts:JSON.parse(JSON.stringify(st.parts || []))}, busy:false, msg:null};
+  S.view = "edit"; render(); top();
+}
+function readForm() {
+  const c = S.edit.c;
+  c.name = byId("f-name").value.trim(); c.examDate = byId("f-date").value; c.info = byId("f-info").value;
+  c.minutes = byId("f-min").value; c.scale = byId("f-scale").value.trim();
+  c.parts = [...app.querySelectorAll(".part")].map(row => {
+    const type = row.querySelector(".ptype select").value, pp = num(row.querySelector(".pp").value, 1);
+    return TYPES[type].closed ? {type, count:num(row.querySelector(".pc").value, 0), plus:pp, minus:num(row.querySelector(".pm").value, 0)} : {type, count:num(row.querySelector(".pc").value, 0), points:pp};
+  });
+}
+function partRow(p, i) {
+  const closed = TYPES[p.type].closed;
+  return `<div class="part" data-i="${i}">
+    <label class="ptype">Typ<select aria-label="Frågetyp">${Object.entries(TYPES).map(([k, t]) => `<option value="${k}"${k === p.type ? " selected" : ""}>${t.label}</option>`).join("")}</select></label>
+    <label>Antal<input class="pc" type="number" min="0" inputmode="numeric" value="${esc(p.count)}"></label>
+    <label>${closed ? "Rätt +" : "Max p"}<input class="pp" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(closed ? p.plus : (p.points || 2))}"></label>
+    <label>${closed ? "Fel −" : "&nbsp;"}<input class="pm" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(p.minus || 0)}"${closed ? "" : " hidden"}></label>
+    <button class="link muted x" data-rm="${i}">Ta bort</button></div>`;
+}
+function renderEdit() {
+  const e = S.edit, c = e.c, course = S.course, mi = S.matInfo;
+  app.innerHTML = `<div class="row between"><button class="link" id="back">← Till tentan</button></div><h1>Tentans inställningar</h1>
+  <div class="card">
+    <label>Namn<input id="f-name" type="text" value="${esc(c.name)}"></label>
+    <label>Tentadatum<input id="f-date" type="date" value="${esc(c.examDate)}"></label>
+  </div>
+  <div class="card"><h2>Material</h2>
+    ${course.kind === "fs" ? `<p class="muted small">Allt i mappen <b>${esc(course.handle.name)}</b> används: PDF, Word (.docx), PowerPoint (.pptx) och textfiler, även i undermappar. Lägg till eller ta bort filer direkt i mappen och tryck på Läs in mappen igen.</p>`
+      : `<p class="muted small">PDF, Word (.docx), PowerPoint (.pptx) eller textfiler. Filerna sparas i den här webbläsaren.</p>`}
+    ${S.loading ? `<p class="muted small"><span class="spin"></span> ${esc(S.loading)}</p>` : mi && mi.files.length ? `<ul class="files">${mi.files.map(f => `<li><span class="nm">${esc(f.name)}</span><span class="row" style="flex-wrap:nowrap"><span class="muted small">${f.chars ? fmtChars(f.chars) : "ingen text"}</span>${course.kind === "local" ? `<button class="link muted" data-rmf="${esc(f.name)}">Ta bort</button>` : ""}</span></li>`).join("")}</ul>` : `<p class="muted small">Inget material ännu.</p>`}
+    <div class="actions"><label class="btn ghost" style="flex-direction:row;justify-content:center;cursor:pointer">${course.kind === "fs" ? "Kopiera filer till mappen" : "Lägg till filer"}<input id="f-files" type="file" multiple accept=".pdf,.docx,.pptx,.txt,.md" hidden></label>${course.kind === "fs" ? `<button class="btn quiet" id="rescan">Läs in mappen igen</button>` : ""}</div>
+  </div>
+  <div class="card"><h2>Om tentan</h2>
+    <label>Information från läraren<textarea id="f-info" placeholder="Klistra in vad läraren sagt om tentan: frågetyper, antal frågor, poäng, minuspoäng, tid, vitsordsskala, vad som är viktigt…">${esc(c.info)}</textarea></label>
+    <div class="actions"><button class="btn quiet sm" id="autofmt"${e.busy ? " disabled" : ""}>${e.busy === "fmt" ? '<span class="spin"></span> Läser texten…' : "Fyll i upplägget från texten"}</button></div>
+    <h3>Upplägg</h3>
+    <div class="stack">${c.parts.map(partRow).join("")}</div>
+    <div class="actions"><button class="btn quiet sm" id="addpart">Lägg till en del</button></div>
+    <div class="grid2"><label>Skrivtid (min)<input id="f-min" type="number" min="0" inputmode="numeric" value="${esc(c.minutes)}"></label>
+    <label>Vitsordsskala<input id="f-scale" type="text" value="${esc(c.scale)}" placeholder="50-59=1, 60-69=2, …"></label></div>
+  </div>
+  ${e.msg ? `<div class="notice${e.msg.err ? " err" : ""}">${esc(e.msg.text)}</div>` : ""}
+  <div class="actions"><button class="btn" id="save">Spara</button></div>
+  <div class="card"><div>${e.confirmDel ? `<p><b>Ta bort tentan från listan?</b> ${course.kind === "fs" ? "Mappen och filerna på datorn rörs inte." : "Material och statistik raderas från webbläsaren."}</p><div class="actions"><button class="btn danger" id="delyes">Ta bort</button><button class="btn quiet" id="delno">Avbryt</button></div>` : `<button class="link muted" id="del">Ta bort tentan från listan</button>`}</div></div>`;
+
+  on("back", "click", () => { S.edit = null; S.view = "course"; render(); top(); });
+  on("f-files", "change", async ev => {
+    readForm(); const files = [...ev.target.files].filter(f => MAT_RE.test(f.name));
+    if (!files.length) return;
+    try { await addFiles(course, files); } catch (err) { e.msg = {text:"Kunde inte spara filerna.", err:true}; return render(); }
+    await loadMaterial(); render();
+  });
+  on("rescan", "click", async () => { readForm(); await loadMaterial(); render(); });
+  app.querySelectorAll("[data-rmf]").forEach(b => b.onclick = async () => { readForm(); await removeLocalFile(course, b.dataset.rmf); await loadMaterial(); render(); });
+  app.querySelectorAll(".part .ptype select").forEach(sel => sel.onchange = () => { readForm(); const p = c.parts[+sel.closest(".part").dataset.i]; if (TYPES[p.type].closed) { p.plus = 1; p.minus = 0; delete p.points; } else { p.points = p.type === "essay" ? 10 : p.type === "calc" ? 4 : 2; } render(); });
+  app.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { readForm(); c.parts.splice(+b.dataset.rm, 1); render(); });
+  on("addpart", "click", () => { readForm(); c.parts.push({type:"tf", count:10, plus:1, minus:0}); render(); });
+  on("autofmt", "click", async () => {
+    readForm(); if (!c.info.trim()) { e.msg = {text:"Skriv eller klistra in information om tentan först.", err:true}; return render(); }
+    e.busy = "fmt"; e.msg = null; render();
+    try {
+      const r = await parseFormat(c.info) || {};
+      const parts = (Array.isArray(r.parts) ? r.parts : []).filter(p => TYPES[p.type]).map(p => TYPES[p.type].closed ? {type:p.type, count:num(p.count, 10), plus:num(p.plus, 1), minus:num(p.minus, 0)} : {type:p.type, count:num(p.count, 1), points:num(p.points, 0) || (p.type === "essay" ? 10 : 2)});
+      if (parts.length) c.parts = parts;
+      if (r.minutes) c.minutes = String(r.minutes);
+      if (r.scale) c.scale = String(r.scale);
+      e.msg = {text:parts.length ? "Upplägget är ifyllt. Kontrollera att det stämmer och tryck Spara." : "Hittade inget upplägg i texten. Fyll i det själv nedan."};
+    } catch (err) { e.msg = {text:errText(err), err:true}; }
+    e.busy = false; render();
+  });
+  on("save", "click", async () => {
+    readForm(); if (!c.name) { e.msg = {text:"Ge tentan ett namn.", err:true}; return render(); }
+    Object.assign(S.state, {name:c.name, examDate:c.examDate, info:c.info, minutes:c.minutes, scale:c.scale, parts:c.parts.filter(p => p.count > 0)});
+    await saveState(); S.edit = null; S.view = "course"; render(); top();
+  });
+  on("del", "click", () => { readForm(); e.confirmDel = true; render(); });
+  on("delno", "click", () => { e.confirmDel = false; render(); });
+  on("delyes", "click", async () => {
+    clearTimeout(saveT); saveT = null;
+    await idbDel("courses", course.id);
+    if (course.kind === "local") { for (const n of course.files || []) await idbDel("blobs", course.id + "/f/" + n); await idbDel("blobs", course.id + "#" + STATE_FILE); await idbDel("blobs", course.id + "#" + CACHE_FILE); }
+    S.courses = S.courses.filter(x => x.id !== course.id); S.course = null; S.state = null; S.material = null; S.edit = null; S.view = "home"; render(); top();
+  });
+}
+
+// ----- tentans översikt
+let pickTypes = null, pickTopic = "";
+function renderCourse() {
+  const c = S.state, course = S.course;
+  if (!c) { app.innerHTML = `<div class="row between"><button class="link" id="back">← Mina tentor</button></div><div class="card"><p class="muted"><span class="spin"></span> ${esc(S.loading || "Laddar…")}</p></div>`; on("back", "click", goHome); return; }
+  const d = daysTo(c.examDate), p = c.progress, mat = S.material, mi = S.matInfo;
+  const types = [...new Set((c.parts || []).map(x => x.type))];
+  if (!pickTypes || pickTypes.id !== course.id) pickTypes = {id:course.id, set:new Set(types.length ? types : ["mc"])};
+  const weak = weakTopics();
+  const tlist = Object.entries(p.topics || {}).map(([k, v]) => ({k, n:v.r + v.w, acc:v.r / Math.max(1, v.r + v.w)}));
+  const ordered = (c.topics || []).map(k => tlist.find(x => x.k === k) || {k, n:0, acc:0}).concat(tlist.filter(x => !(c.topics || []).includes(x.k)));
+  ordered.sort((a, b) => (a.n ? a.acc : 2) - (b.n ? b.acc : 2));
+  const sessions = (p.sessions || []).slice(-5).reverse();
+  const hasMat = mat && mat.length, key = !!getKey() && !!getModel();
+  const canGen = hasMat && key && !S.loading;
+  const topicsStale = hasMat && mi && c.topicsKey !== mi.key;
+  app.innerHTML = `<div class="row between"><button class="link" id="back">← Mina tentor</button><button class="link" id="edit">Inställningar för tentan</button></div>
+  <div class="stack" style="gap:6px"><h1>${esc(c.name)}</h1>
+  <p class="muted">${d !== null ? (d > 1 ? d + " dagar till tentan" : d === 1 ? "Tentan är i morgon" : d === 0 ? "Tentan är i dag" : "Tentan har varit") + " · " : ""}${totalQ(c)} frågor${maxPoints(c) ? " · max " + fmtP(maxPoints(c)) + " p" : ""}${c.minutes ? " · " + c.minutes + " min" : ""}</p></div>
+  ${S.banner ? `<div class="notice">${esc(S.banner)} <button class="link" id="nobanner">Stäng</button></div>` : ""}
+  ${S.loading ? `<div class="notice"><span class="spin"></span> ${esc(S.loading)}</div>` : ""}
+  ${!key ? `<div class="notice">Lägg in din OpenRouter-nyckel och välj en modell för att skapa frågor. <button class="link" id="gosettings">Inställningar</button></div>` : ""}
+  ${!S.loading && mat && !mat.length ? `<div class="notice">Ingen text hittades i ${course.kind === "fs" ? "mappen" : "tentan"}. ${course.kind === "fs" ? "Lägg PDF-, Word-, PowerPoint- eller textfiler i mappen och tryck " : "Tryck "}<button class="link" id="edit2">${course.kind === "fs" ? "Läs in mappen igen" : "Lägg till material"}</button>.</div>` : ""}
+  ${!totalQ(c) ? `<div class="notice">Beskriv hur tentan ser ut så blir frågorna mer lika den riktiga tentan. <button class="link" id="edit3">Fyll i upplägget</button></div>` : ""}
+  ${topicsStale && key && !S.analyzing ? `<div class="notice">Materialet har ändrats. Låt AI:n dela in det i ämnesområden, så får du statistik per område och kan öva på det du är svag på. <button class="link" id="analyze">Dela in i ämnesområden</button></div>` : ""}
+  ${S.analyzing ? `<div class="notice"><span class="spin"></span> Delar in materialet i ämnesområden…</div>` : ""}
+
+  <div class="card"><p class="eyebrow">Övning</p><h2>Snabbövning</h2>
+    <p class="muted small">Tio frågor i taget med svar och förklaring direkt. Fortsätt så länge du vill – det blir nya frågor varje gång.</p>
+    <div class="chips" role="group" aria-label="Frågetyper">${Object.entries(TYPES).map(([k, t]) => `<button class="chip" data-type="${k}" aria-pressed="${pickTypes.set.has(k)}">${t.label}</button>`).join("")}</div>
+    <label>Ämne<select id="topic"><option value="">Hela kursen</option>${weak.length ? `<option value="__weak"${pickTopic === "__weak" ? " selected" : ""}>Mina svaga områden</option>` : ""}${(c.topics || []).map(t => `<option value="${esc(t)}"${pickTopic === t ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+    <div class="actions"><button class="btn" id="go-practice"${canGen ? "" : " disabled"}>Starta övning</button></div></div>
+
+  <div class="card"><p class="eyebrow">Generalrepetition</p><h2>Provtenta</h2>
+    <p class="muted small">En hel tenta enligt upplägget: ${(c.parts || []).map(x => x.count + " " + TYPES[x.type].short.toLowerCase()).join(", ") || "inget upplägg ännu"}${c.minutes ? ", " + c.minutes + " minuter" : ""}. Svaren visas när du lämnar in.</p>
+    <div class="actions"><button class="btn" id="go-exam"${canGen && totalQ(c) ? "" : " disabled"}>Skapa provtenta</button></div></div>
+
+  <div class="card"><p class="eyebrow">Repetition</p><h2>Frågor du missat</h2>
+    <p class="muted small">${(p.missed || []).length ? (p.missed || []).length + " frågor väntar. Frågor du svarar rätt på försvinner från listan." : "Inga missade frågor ännu."}</p>
+    <div class="actions"><button class="btn ghost" id="go-missed"${(p.missed || []).length ? "" : " disabled"}>Repetera missade</button></div></div>
+
+  ${p.answered ? `<div class="card"><h2>Hur det går</h2>
+    <div class="stats"><div class="stat"><b>${p.answered}</b><span>besvarade</span></div><div class="stat"><b>${Math.round(100 * p.correct / Math.max(1, p.answered))} %</b><span>rätt</span></div><div class="stat"><b>${(p.sessions || []).length}</b><span>pass</span></div></div>
+    ${ordered.some(x => x.n) ? `<h3>Per ämnesområde</h3><div class="topics">${ordered.map(x => `<div class="topic"><span class="nm">${esc(x.k)}${x.n ? ` <span class="muted small">(${x.n})</span>` : ""}</span><span class="meter">${x.n ? `<span class="${x.acc < .5 ? "low" : x.acc < .75 ? "mid" : ""}" style="width:${Math.round(x.acc * 100)}%"></span>` : ""}</span><button class="link small" data-topic="${esc(x.k)}"${canGen ? "" : " disabled"}>Öva</button></div>`).join("")}</div>` : ""}
+    ${sessions.length ? `<h3>Senaste passen</h3><ul class="list">${sessions.map(s => `<li><span class="row between"><span>${esc(s.mode)}</span><span class="muted small">${new Date(s.at).toLocaleDateString("sv-FI")}</span></span><span class="muted small">${s.max ? fmtP(s.pts) + " / " + fmtP(s.max) + " p" : ""}${s.grade ? " · " + esc(s.grade) : ""} · ✓ ${s.r} ✗ ${s.w}${s.s ? " – " + s.s : ""}</span></li>`).join("")}</ul>` : ""}</div>` : ""}
+
+  ${mi && mi.files.length ? `<div class="card"><div class="row between"><h3>Material</h3>${course.kind === "fs" ? `<button class="link small" id="rescan"${S.loading ? " disabled" : ""}>Läs in mappen igen</button>` : ""}</div><ul class="files">${mi.files.map(f => `<li><span class="nm">${esc(f.name)}</span><span class="muted small">${f.chars ? fmtChars(f.chars) : "ingen text"}</span></li>`).join("")}</ul>
+    ${(c.topics || []).length ? `<p class="muted small">Ämnesområden: ${c.topics.map(esc).join(" · ")}</p>` : ""}</div>` : ""}`;
+
+  on("back", "click", goHome);
+  on("edit", "click", startEdit); on("edit3", "click", startEdit);
+  on("edit2", "click", () => course.kind === "fs" ? loadMaterial() : startEdit());
+  on("rescan", "click", loadMaterial);
+  on("gosettings", "click", () => { S.view = "settings"; render(); top(); });
+  on("nobanner", "click", () => { S.banner = null; render(); });
+  on("analyze", "click", async () => {
+    S.analyzing = true; render();
+    try { const t = await analyzeTopics(); if (S.state === c) { c.topics = t; c.topicsKey = mi.key; await saveState(); } }
+    catch (e) { S.banner = "Kunde inte dela in materialet: " + errText(e); }
+    S.analyzing = false; if (S.view === "course") render();
+  });
+  app.querySelectorAll("[data-type]").forEach(b => b.onclick = () => { const k = b.dataset.type; if (pickTypes.set.has(k)) { if (pickTypes.set.size > 1) pickTypes.set.delete(k); } else pickTypes.set.add(k); app.querySelectorAll("[data-type]").forEach(x => x.setAttribute("aria-pressed", pickTypes.set.has(x.dataset.type))); });
+  on("topic", "change", ev => pickTopic = ev.target.value);
+  on("go-practice", "click", () => startPractice({types:[...pickTypes.set], topic:pickTopic}));
+  on("go-exam", "click", startExam);
+  on("go-missed", "click", () => startPractice({missed:true}));
+  app.querySelectorAll("[data-topic]").forEach(b => b.onclick = () => { pickTopic = b.dataset.topic; startPractice({types:[...pickTypes.set], topic:b.dataset.topic}); });
+}
+async function goHome() { await saveState(); S.course = null; S.state = null; S.material = null; S.matInfo = null; S.banner = null; S.view = "home"; await loadCourses(); render(); top(); }
+
+// ----- snabbövning
+function batchSpec(types) {
+  const open = types.filter(t => !TYPES[t].closed), closed = types.filter(t => TYPES[t].closed);
+  if (!closed.length) { if (open.length === 1 && open[0] === "essay") return [{type:"essay", n:1}]; return open.map(t => ({type:t, n:t === "essay" ? 1 : 2})); }
+  const spec = [], n = 10 - open.length;
+  closed.forEach((t, i) => spec.push({type:t, n:Math.floor(n / closed.length) + (i < n % closed.length ? 1 : 0)}));
+  open.forEach(t => spec.push({type:t, n:1}));
+  return spec.filter(x => x.n > 0);
+}
+function startPractice({types, topic, missed}) {
+  const P = {missed:!!missed, types:types || [], topic:topic || "", list:[], res:[], drafts:{}, i:0, busy:false, ctl:null, err:null};
+  if (missed) P.list = shuffle((prog().missed || []).map(q => ({...q, id:rid(), perm:q.options ? shuffle(q.options.map((_, k) => k)) : undefined})));
+  S.P = P; S.view = "practice"; render(); top();
+  if (!missed) genBatch();
+}
+async function genBatch() {
+  const P = S.P; if (!P || P.busy) return;
+  P.busy = true; P.err = null; P.ctl = new AbortController(); render();
+  const topic = P.topic === "__weak" ? "" : P.topic;
+  const focus = P.topic === "__weak" ? weakTopics().slice(0, 3).map(x => x.k).join(", ") : "";
+  try {
+    await generate({spec:batchSpec(P.types), topic, focus, signal:P.ctl.signal, onQ:q => {
+      if (S.P !== P) return; const waiting = P.i >= P.list.length; P.list.push(q); noteAsked(q);
+      if (S.view === "practice" && waiting) render(); else updatePracticeMeta();
+    }});
+  } catch (e) { if (S.P === P && e && e.code !== "cancelled") P.err = errText(e); }
+  if (S.P !== P) return;
+  P.busy = false; P.ctl = null;
+  if (S.view === "practice") { if (P.i >= P.list.length || P.err) render(); else updatePracticeMeta(); }
+}
+function practiceScore(P) {
+  let pts = 0, max = 0, r = 0, w = 0, s = 0;
+  P.res.forEach(x => { if (!x || x.flagged || x.grading) return; pts += x.pts; max += x.max; if (x.skip) s++; else if (x.ok) r++; else w++; });
+  return {pts, max, r, w, s};
+}
+const metaText = P => `Fråga ${Math.min(P.i + 1, Math.max(P.list.length, 1))} av ${P.list.length}${P.busy ? " (fler på väg)" : ""}`;
+function updatePracticeMeta() { const el = byId("qcount"); if (el && S.P) el.textContent = metaText(S.P); }
+function renderPractice() {
+  const P = S.P; if (!P) { S.view = "course"; return render(); }
+  const sc = practiceScore(P);
+  let body;
+  if (P.i >= P.list.length) {
+    if (P.busy) body = `<div class="card"><p><span class="spin"></span> AI:n skriver ${P.list.length ? "fler " : ""}frågor utifrån ditt material…</p><p class="muted small">Frågorna dyker upp här så fort de är klara.</p><div class="actions"><button class="btn quiet sm" id="stop">Avbryt</button></div></div>`;
+    else body = `<div class="card"><h2>${P.missed ? "Repetitionen är klar" : P.list.length ? "Omgången är klar" : "Inga frågor"}</h2>
+      ${P.err ? `<div class="notice err">${esc(P.err)}</div>` : ""}
+      <p>${sc.r} rätt, ${sc.w} fel${sc.s ? ", " + sc.s + " överhoppade" : ""}${sc.max ? ` · ${fmtP(sc.pts)} av ${fmtP(sc.max)} p` : ""}.</p>
+      <div class="actions">${!P.missed ? `<button class="btn" id="more">${P.err && !P.list.length ? "Försök igen" : "Fortsätt med nya frågor"}</button>` : ""}<button class="btn ghost" id="quit2">Tillbaka till tentan</button></div></div>`;
+  } else body = questionCard(P);
+  app.innerHTML = `<div class="row between"><button class="link" id="quit">← Avsluta</button><span class="muted small" id="qcount">${metaText(P)}</span></div>
+  <div class="bar"><span class="score">${signed(sc.pts)} p</span><span class="tally"><span>✓ ${sc.r}</span><span>✗ ${sc.w}</span><span>– ${sc.s}</span></span></div>` + body;
+  on("quit", "click", endPractice); on("quit2", "click", endPractice);
+  on("stop", "click", () => P.ctl && P.ctl.abort());
+  on("more", "click", genBatch);
+  bindQuestion(P);
+}
+function questionCard(P) {
+  const q = P.list[P.i], res = P.res[P.i], done = res && !res.grading;
+  const sc = TYPES[q.type].closed ? scoring(q.type) : null;
+  let inner;
+  if (q.type === "mc" || q.type === "multi") {
+    const sel = P.drafts[q.id] || [];
+    inner = `<div class="opts">${q.perm.map((oi, j) => {
+      let cls = "";
+      if (done) { const isC = q.type === "mc" ? oi === q.correct : q.correct.includes(oi); const picked = q.type === "mc" ? res.a === oi : (res.a || []).includes(oi); cls = isC ? " right" : picked ? " wrong" : " dim"; }
+      else if (q.type === "multi" && sel.includes(oi)) cls = " sel";
+      return `<button class="opt${cls}" data-o="${oi}"${done ? " disabled" : ""}><span class="k">${L[j]}</span><span>${esc(q.options[oi])}</span></button>`; }).join("")}</div>`;
+  } else if (q.type === "tf") {
+    inner = `<div class="tf">${[true, false].map(v => { let cls = ""; if (done) cls = v === q.answer ? " right" : res.a === v ? " wrong" : " dim"; return `<button class="opt${cls}" data-tf="${v}"${done ? " disabled" : ""}>${v ? "Sant" : "Falskt"}</button>`; }).join("")}</div>`;
+  } else inner = `<textarea id="ans" class="${q.type === "essay" ? "essay" : "answer"}" placeholder="${q.type === "calc" ? "Skriv din lösning och ditt svar" : "Skriv ditt svar"}"${res ? " disabled" : ""}>${esc(res ? res.a : P.drafts[q.id] || "")}</textarea>`;
+  let fb = "";
+  if (res && res.grading) fb = `<div class="fb skip"><span><span class="spin"></span> AI:n rättar ditt svar…</span></div>`;
+  else if (res && res.error) fb = `<div class="notice err">${esc(res.error)}</div>`;
+  else if (done) {
+    if (res.flagged) fb = `<div class="fb skip"><strong>Struken</strong><span>Frågan räknas inte. AI-frågor kan ibland bli fel.</span></div>`;
+    else if (TYPES[q.type].closed) fb = `<div class="fb ${res.skip ? "skip" : res.ok ? "good" : "bad"}"><strong>${res.skip ? "Överhoppad · 0 p" : res.ok ? "Rätt! " + signed(res.pts) + " p" : "Fel. " + signed(res.pts) + " p"}</strong>${!res.ok ? `<span>Rätt svar: <b>${esc(correctText(q))}</b></span>` : ""}<span>${esc(q.explanation)}</span></div>`;
+    else {
+      const g = res.g || {};
+      const cls = res.skip ? "skip" : g.points >= g.max * 0.75 ? "good" : g.points > 0 ? "part" : "bad";
+      fb = `<div class="fb ${cls}"><strong>${res.skip ? "Överhoppad" : fmtP(g.points) + " av " + fmtP(g.max) + " p"}</strong>
+        ${g.feedback ? `<span>${esc(g.feedback)}</span>` : ""}
+        ${g.missing && g.missing.length ? `<span><b>Saknades:</b></span><ul>${g.missing.map(m => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
+        <span><b>Mönstersvar:</b></span><span class="pre">${esc(g.model || q.answer)}</span>${q.solution ? `<span><b>Lösning:</b></span><span class="pre">${esc(q.solution)}</span>` : ""}</div>`;
+    }
+  }
+  const last = P.i === P.list.length - 1 && !P.busy;
+  let acts = "";
+  if (!res || res.error) {
+    if (q.type === "multi") acts = `<button class="btn" id="submit">Svara</button><button class="btn ghost" id="skip">Hoppa över (0 p)</button>`;
+    else if (TYPES[q.type].closed) acts = `<button class="btn ghost" id="skip">Hoppa över (0 p)</button>`;
+    else acts = `<button class="btn" id="grade">Rätta mitt svar</button><button class="btn ghost" id="skip">Visa mönstersvar</button>`;
+  } else if (done) acts = `<button class="btn" id="next">${last ? "Klar" : "Nästa fråga"}</button>`;
+  return `<div class="card"><p class="eyebrow">${esc(TYPES[q.type].label)} · ${esc(q.topic)}${sc ? ` · +${fmtP(sc.plus)}/−${fmtP(sc.minus)}` : ` · max ${fmtP(q.points)} p`}</p>
+    <h2 class="pre">${esc(q.q)}</h2>${q.type === "multi" && !done ? `<p class="muted small">Flera alternativ kan vara rätt. Markera alla rätta och tryck Svara.</p>` : ""}
+    ${inner}${fb}<div class="actions">${acts}</div>
+    ${done && !res.flagged && !res.skip ? `<p class="small"><button class="link muted" id="flag">Frågan verkar fel – stryk den</button></p>` : ""}</div>`;
+}
+function bindQuestion(P) {
+  const q = P.list[P.i]; if (!q) return;
+  const res = P.res[P.i];
+  if (!res || res.error) {
+    if (q.type === "mc") app.querySelectorAll("[data-o]").forEach(b => b.onclick = () => answerClosed(P, +b.dataset.o));
+    if (q.type === "multi") app.querySelectorAll("[data-o]").forEach(b => b.onclick = () => { const o = +b.dataset.o, s = P.drafts[q.id] || []; P.drafts[q.id] = s.includes(o) ? s.filter(x => x !== o) : s.concat(o); b.classList.toggle("sel"); });
+    if (q.type === "tf") app.querySelectorAll("[data-tf]").forEach(b => b.onclick = () => answerClosed(P, b.dataset.tf === "true"));
+    on("submit", "click", () => { const s = P.drafts[q.id] || []; if (s.length) answerClosed(P, s.slice()); });
+    on("skip", "click", () => { P.res[P.i] = TYPES[q.type].closed ? {skip:true, ok:false, pts:0, max:0} : {skip:true, ok:false, pts:0, max:0, a:(byId("ans") || {}).value || "", g:{model:q.answer}}; render(); });
+    on("ans", "input", ev => P.drafts[q.id] = ev.target.value);
+    on("grade", "click", () => gradePractice(P));
+  }
+  on("next", "click", () => { P.i++; render(); top(); });
+  on("flag", "click", () => {
+    const r = P.res[P.i]; r.flagged = true; const pr = prog();
+    if (pr) { const t = pr.topics[q.topic]; if (t) { if (r.ok) { t.r = Math.max(0, t.r - 1); pr.correct = Math.max(0, pr.correct - 1); } else t.w = Math.max(0, t.w - 1); } pr.answered = Math.max(0, pr.answered - 1); pr.missed = (pr.missed || []).filter(m => m.q !== q.q); markProgress(); }
+    render();
+  });
+}
+function answerClosed(P, a) {
+  const q = P.list[P.i], ok = checkClosed(q, a), sc = scoring(q.type);
+  P.res[P.i] = {a, ok, pts:ok ? sc.plus : -sc.minus, max:sc.plus};
+  record(q, ok); render();
+}
+async function gradePractice(P) {
+  const q = P.list[P.i], a = (byId("ans") || {}).value || "", idx = P.i;
+  if (!a.trim()) return byId("ans").focus();
+  P.drafts[q.id] = a; P.res[idx] = {grading:true, a}; render();
+  try {
+    const g = await gradeOpen(q, a, q.points);
+    if (S.P !== P) return;
+    P.res[idx] = {a, g, ok:g.points >= g.max * 0.75, pts:g.points, max:g.max};
+    record(q, g.points >= g.max * 0.75, g.points > 0 && g.points < g.max * 0.75);
+  } catch (e) { if (S.P !== P) return; P.res[idx] = {error:errText(e)}; }
+  if (S.view === "practice" && P.i === idx) render();
+}
+async function endPractice() {
+  const P = S.P; if (P && P.ctl) P.ctl.abort();
+  if (P) { const sc = practiceScore(P); if (sc.r + sc.w) addSession({mode:P.missed ? "Repetition" : "Snabbövning", pts:sc.pts, max:sc.max, r:sc.r, w:sc.w, s:sc.s}); }
+  S.P = null; S.view = "course"; await saveState(); render(); top();
+}
+
+// ----- provtenta
+function startExam() {
+  const E = {qs:[], parts:[], ans:{}, i:0, phase:"gen", made:0, total:totalQ(S.state), err:null, ctl:new AbortController(), end:0, tm:0, confirm:false};
+  S.E = E; S.view = "exam"; render(); top();
+  genExam(E);
+}
+async function genExam(E) {
+  const c = S.state, jobs = [];
+  (c.parts || []).forEach((p, pi) => {
+    E.parts[pi] = [];
+    const size = TYPES[p.type].closed ? 15 : (p.type === "essay" ? 2 : 4);
+    for (let left = p.count; left > 0; left -= size) jobs.push({pi, type:p.type, n:Math.min(size, left), got:0});
+  });
+  const run = async job => {
+    for (let tries = 0; tries < 2 && !E.ctl.signal.aborted && job.got < job.n; tries++) {
+      const got = await generate({spec:[{type:job.type, n:job.n - job.got}], signal:E.ctl.signal, onQ:q => { E.parts[job.pi].push(q); E.made++; job.got++; if (S.E === E && E.phase === "gen") updateGen(E); }});
+      if (!got.length) break;
+    }
+  };
+  try {
+    const queue = jobs.slice();
+    const worker = async () => { while (queue.length && !E.ctl.signal.aborted) await run(queue.shift()); };
+    await Promise.all([worker(), worker()]);
+  } catch (e) { if (e && e.code !== "cancelled") E.err = errText(e); }
+  if (S.E !== E || E.ctl.signal.aborted) return;
+  E.qs = E.parts.flat(); E.qs.forEach(noteAsked);
+  E.phase = "ready"; render();
+}
+function updateGen(E) { const el = byId("genc"); if (el) el.textContent = E.made + " av " + E.total; const bar = byId("genbar"); if (bar) bar.style.width = Math.round(100 * E.made / Math.max(1, E.total)) + "%"; }
+const fmtT = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+function beginExam(E) {
+  const mins = num(S.state.minutes, 0);
+  E.phase = "run"; E.i = 0;
+  if (mins > 0) { E.end = Date.now() + mins * 60000; E.tm = setInterval(() => tickExam(E), 1000); }
+  render(); top();
+}
+function tickExam(E) {
+  if (S.E !== E || E.phase !== "run") return clearInterval(E.tm);
+  const left = E.end - Date.now(), el = byId("timer");
+  if (el) { el.textContent = fmtT(left); el.classList.toggle("low", left < 5 * 60000); }
+  if (left <= 0) submitExam(E, true);
+}
+const answered = (E, q) => { const a = E.ans[q.id]; return !(a === undefined || a === null || (Array.isArray(a) && !a.length) || (typeof a === "string" && !a.trim())); };
+const examMax = E => E.qs.reduce((s, q) => s + (TYPES[q.type].closed ? scoring(q.type).plus : q.points), 0);
+function renderExam() {
+  const E = S.E, c = S.state; if (!E) { S.view = "course"; return render(); }
+  const back = () => { S.E = null; S.view = "course"; render(); top(); };
+  if (E.phase === "gen") {
+    app.innerHTML = `<div class="row between"><button class="link" id="cancel">← Avbryt</button></div><h1>Provtenta</h1>
+    <div class="card"><p><span class="spin"></span> AI:n skriver tentan: <b id="genc">${E.made} av ${E.total}</b> frågor klara.</p><div class="progress"><span id="genbar" style="width:${Math.round(100 * E.made / Math.max(1, E.total))}%"></span></div>
+    <p class="muted small">Klockan startar först när du trycker på Börja skriva.</p></div>`;
+    on("cancel", "click", () => { E.ctl.abort(); back(); });
+    return;
+  }
+  if (E.phase === "ready") {
+    const n = E.qs.length;
+    app.innerHTML = `<div class="row between"><button class="link" id="cancel">← Tillbaka</button></div><h1>Provtentan är klar</h1>
+    <div class="card">${E.err ? `<div class="notice err">${esc(E.err)}</div>` : ""}
+    ${n ? `<p>${n} frågor${n < E.total ? ` (av ${E.total} planerade)` : ""}${c.minutes ? ", " + c.minutes + " minuter" : ", ingen tidsgräns"}. Max ${fmtP(examMax(E))} p.</p>
+    <p class="muted small">${(c.parts || []).filter(p => TYPES[p.type].closed).map(p => TYPES[p.type].label + ": +" + fmtP(p.plus) + " rätt, −" + fmtP(p.minus) + " fel, 0 obesvarad").join(" · ")}</p>
+    ${c.scale ? `<p class="muted small">Vitsord: ${esc(c.scale)}</p>` : ""}
+    <div class="actions"><button class="btn" id="begin">Börja skriva</button></div>` : `<p>Inga frågor kunde skapas.</p><div class="actions"><button class="btn" id="retry">Försök igen</button></div>`}</div>`;
+    on("cancel", "click", back); on("begin", "click", () => beginExam(E)); on("retry", "click", startExam);
+    return;
+  }
+  if (E.phase === "run") return renderExamQ(E);
+  if (E.phase === "grading") { app.innerHTML = `<h1>Rättar…</h1><div class="card"><p><span class="spin"></span> AI:n rättar dina öppna svar: <b>${E.graded} av ${E.toGrade}</b>.</p></div>`; return; }
+  if (E.phase === "done") return renderExamResult(E);
+}
+function renderExamQ(E) {
+  const k = E.i, n = E.qs.length, q = E.qs[k], a = E.ans[q.id], done = E.qs.filter(x => answered(E, x)).length, open = n - done;
+  const left = E.end ? E.end - Date.now() : 0, sc = TYPES[q.type].closed ? scoring(q.type) : null;
+  let inner;
+  if (q.type === "mc" || q.type === "multi") inner = `<div class="opts">${q.perm.map((oi, j) => { const s = q.type === "mc" ? a === oi : (a || []).includes(oi); return `<button class="opt${s ? " sel" : ""}" data-o="${oi}" aria-pressed="${s}"><span class="k">${L[j]}</span><span>${esc(q.options[oi])}</span></button>`; }).join("")}</div>`;
+  else if (q.type === "tf") inner = `<div class="tf">${[true, false].map(v => `<button class="opt${a === v ? " sel" : ""}" data-tf="${v}" aria-pressed="${a === v}">${v ? "Sant" : "Falskt"}</button>`).join("")}</div>`;
+  else inner = `<textarea id="ans" class="${q.type === "essay" ? "essay" : "answer"}" placeholder="Skriv ditt svar">${esc(a || "")}</textarea>`;
+  app.innerHTML = `<div class="bar"><span class="score timer${E.end && left < 5 * 60000 ? " low" : ""}" id="timer">${E.end ? fmtT(left) : "Ingen tidsgräns"}</span><span class="tally"><span>Fråga ${k + 1}/${n}</span><span id="donec">${done} besvarade</span></span></div>
+  <div class="card"><p class="eyebrow">${esc(TYPES[q.type].label)}${sc ? ` · +${fmtP(sc.plus)}/−${fmtP(sc.minus)}` : ` · max ${fmtP(q.points)} p`}</p><h2 class="pre">${esc(q.q)}</h2>
+  ${q.type === "multi" ? `<p class="muted small">Flera alternativ kan vara rätt.</p>` : ""}${inner}
+  <p class="muted small">${TYPES[q.type].closed ? (answered(E, q) ? "Tryck på ditt val igen för att ta bort svaret." : "En obesvarad fråga ger 0 p.") : "Svaret sparas medan du skriver."}</p>
+  <div class="actions"><button class="btn ghost" id="prev"${k === 0 ? " disabled" : ""}>← Föregående</button><button class="btn" id="nextq">${k === n - 1 ? "Lämna in…" : "Nästa →"}</button></div></div>
+  <div class="card"><p class="eyebrow">Översikt</p><div class="grid">${E.qs.map((x, j) => `<button class="gq${answered(E, x) ? " done" : ""}${j === k ? " cur" : ""}" data-g="${j}" aria-label="Fråga ${j + 1}">${j + 1}</button>`).join("")}</div>
+  <div id="sub">${E.confirm ? `<p><b>Lämna in nu?</b> ${open === 0 ? "Alla frågor är besvarade." : open === 1 ? "1 fråga är obesvarad och ger 0 p." : open + " frågor är obesvarade och ger 0 p."}</p><div class="actions"><button class="btn" id="yes">Lämna in</button><button class="btn ghost" id="no">Fortsätt skriva</button></div>` : `<div class="actions"><button class="btn ghost" id="submitx">Lämna in tentan</button></div>`}</div></div>`;
+  const go = j => { E.i = j; E.confirm = false; render(); top(); };
+  const askSubmit = () => { E.confirm = true; render(); byId("sub").scrollIntoView({block:"center"}); };
+  if (q.type === "mc") app.querySelectorAll("[data-o]").forEach(b => b.onclick = () => { const o = +b.dataset.o; E.ans[q.id] = E.ans[q.id] === o ? undefined : o; render(); });
+  if (q.type === "multi") app.querySelectorAll("[data-o]").forEach(b => b.onclick = () => { const o = +b.dataset.o, s = E.ans[q.id] || []; E.ans[q.id] = s.includes(o) ? s.filter(x => x !== o) : s.concat(o); render(); });
+  if (q.type === "tf") app.querySelectorAll("[data-tf]").forEach(b => b.onclick = () => { const v = b.dataset.tf === "true"; E.ans[q.id] = E.ans[q.id] === v ? undefined : v; render(); });
+  on("ans", "input", ev => { E.ans[q.id] = ev.target.value; const d = byId("donec"); if (d) d.textContent = E.qs.filter(x => answered(E, x)).length + " besvarade"; const g = app.querySelector(`[data-g="${k}"]`); if (g) g.classList.toggle("done", answered(E, q)); });
+  app.querySelectorAll("[data-g]").forEach(b => b.onclick = () => go(+b.dataset.g));
+  if (k > 0) on("prev", "click", () => go(k - 1));
+  on("nextq", "click", () => k === n - 1 ? askSubmit() : go(k + 1));
+  on("submitx", "click", askSubmit);
+  on("no", "click", () => { E.confirm = false; render(); });
+  on("yes", "click", () => submitExam(E, false));
+}
+async function submitExam(E, timeout) {
+  if (E.phase !== "run") return;
+  clearInterval(E.tm); E.timeout = timeout; E.results = {};
+  for (const q of E.qs) if (TYPES[q.type].closed) {
+    const ok = answered(E, q) ? checkClosed(q, E.ans[q.id]) : null, sc = scoring(q.type);
+    E.results[q.id] = {ok, pts:ok === null ? 0 : ok ? sc.plus : -sc.minus, max:sc.plus};
+  }
+  const open = E.qs.filter(q => !TYPES[q.type].closed);
+  E.toGrade = open.length; E.graded = 0;
+  if (open.length) { E.phase = "grading"; render(); top(); }
+  for (const q of open) {
+    const a = E.ans[q.id] || "";
+    try { const g = await gradeOpen(q, a, q.points); E.results[q.id] = {ok:g.points >= g.max * 0.75, partial:g.points > 0 && g.points < g.max * 0.75, pts:g.points, max:g.max, g, blank:!a.trim()}; }
+    catch (e) { E.results[q.id] = {ok:false, pts:0, max:q.points, g:{feedback:"Kunde inte rättas: " + errText(e), model:q.answer, missing:[]}, failed:true}; }
+    E.graded++; if (S.E === E) render();
+  }
+  const pr = prog();
+  for (const q of E.qs) {
+    const r = E.results[q.id];
+    if (TYPES[q.type].closed && r.ok === null) { if (pr) { const c = JSON.parse(JSON.stringify(q)); delete c.perm; pr.missed = (pr.missed || []).filter(m => m.q !== q.q).concat(c).slice(-150); } }
+    else if (r.blank) record(q, false);
+    else if (!r.failed) record(q, r.ok, r.partial);
+  }
+  const t = examTotals(E), full = maxPoints(S.state);
+  E.adj = t.max && full && Math.abs(t.max - full) > 0.01 ? Math.round(t.pts * full / t.max * 2) / 2 : null;
+  E.grade = gradeFor(E.adj !== null ? E.adj : t.pts, S.state.scale);
+  addSession({mode:"Provtenta", pts:t.pts, max:t.max, r:t.r, w:t.w, s:t.s, grade:E.grade || ""});
+  saveState();
+  E.phase = "done"; if (S.E === E) { render(); top(); }
+}
+function examTotals(E) {
+  let pts = 0, max = 0, r = 0, w = 0, s = 0;
+  for (const q of E.qs) { const x = E.results[q.id]; pts += x.pts; max += x.max; if (x.ok === null || x.blank) s++; else if (x.ok) r++; else w++; }
+  return {pts, max, r, w, s};
+}
+function renderExamResult(E) {
+  const t = examTotals(E), c = S.state;
+  const byPart = (c.parts || []).map(p => { const qs = E.qs.filter(q => q.type === p.type); return {label:TYPES[p.type].label, pts:qs.reduce((s, q) => s + E.results[q.id].pts, 0), max:qs.reduce((s, q) => s + E.results[q.id].max, 0), n:qs.length}; }).filter(x => x.n);
+  const item = q => { const x = E.results[q.id], a = E.ans[q.id];
+    if (TYPES[q.type].closed) return `<li><span class="pre">${esc(q.q)}</span>${x.ok === null ? `<span class="x">Obesvarad</span>` : `<span class="y">Ditt svar: ${esc(answerText(q, a))}</span>`}<span class="a">Rätt: ${esc(correctText(q))}</span><span class="x">${esc(q.explanation)}</span></li>`;
+    const g = x.g || {}; return `<li><span class="pre">${esc(q.q)}</span><span><b>${fmtP(x.pts)} av ${fmtP(x.max)} p</b></span>${a && a.trim() ? `<span class="x pre">Ditt svar: ${esc(a)}</span>` : `<span class="x">Obesvarad</span>`}${g.feedback ? `<span>${esc(g.feedback)}</span>` : ""}${g.missing && g.missing.length ? `<span class="x">Saknades: ${g.missing.map(esc).join(" · ")}</span>` : ""}<span class="a pre">Mönstersvar: ${esc(g.model || q.answer)}</span></li>`; };
+  const wrong = E.qs.filter(q => TYPES[q.type].closed && E.results[q.id].ok === false);
+  const blank = E.qs.filter(q => TYPES[q.type].closed && E.results[q.id].ok === null);
+  const openQ = E.qs.filter(q => !TYPES[q.type].closed);
+  app.innerHTML = `<p class="eyebrow">${E.timeout ? "Tiden tog slut" : "Inlämnad"}</p><h1>Resultat</h1>
+  <div class="card"><span class="big">${fmtP(t.pts)} / ${fmtP(t.max)}</span>${E.grade ? `<span class="grade">${esc(E.grade)}</span>` : ""}
+  ${E.adj !== null ? `<p class="muted small">Provtentan blev kortare än den riktiga, så poängen är omräknad till ${fmtP(E.adj)} av ${fmtP(maxPoints(c))} p innan vitsordet sattes.</p>` : ""}
+  <p class="muted">✓ ${t.r} rätt · ✗ ${t.w} fel · – ${t.s} obesvarade</p>
+  ${byPart.length > 1 ? `<ul class="files">${byPart.map(b => `<li><span>${esc(b.label)}</span><span class="muted small">${fmtP(b.pts)} / ${fmtP(b.max)} p</span></li>`).join("")}</ul>` : ""}
+  <div class="actions"><button class="btn" id="again">Ny provtenta</button><button class="btn ghost" id="back">Till tentan</button></div></div>
+  ${openQ.length ? `<div class="card"><h2>Öppna frågor</h2><ul class="list">${openQ.map(item).join("")}</ul></div>` : ""}
+  ${wrong.length ? `<div class="card"><h2>Fel svar (${wrong.length})</h2><ul class="list">${wrong.map(item).join("")}</ul></div>` : ""}
+  ${blank.length ? `<div class="card"><h2>Obesvarade (${blank.length})</h2><ul class="list">${blank.map(item).join("")}</ul></div>` : ""}
+  <p class="muted small">Felsvarade och obesvarade frågor ligger nu under ”Frågor du missat”.</p>`;
+  on("again", "click", startExam);
+  on("back", "click", () => { S.E = null; S.view = "course"; render(); top(); });
+}
+
+window.addEventListener("pagehide", () => { saveState(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveState(); });
+window.addEventListener("beforeunload", ev => { if (S.E && S.E.phase === "run") { ev.preventDefault(); ev.returnValue = ""; } });
+
+(async () => {
+  try { await loadCourses(); } catch (e) { S.banner = "Kunde inte läsa listan över tentor i den här webbläsaren."; }
+  render();
+})();
+})();
+</script>
+</body>
+</html>
