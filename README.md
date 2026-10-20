@@ -4,7 +4,9 @@
 
 **Öppna appen: https://williamwsecon-fi.github.io/tentquiz/**
 
-- En mapp per tenta på datorn – lägg föreläsningsbilder, anteckningar och kompendier där (PDF, Word, PowerPoint eller text).
+- En mapp per tenta på datorn – lägg föreläsningsbilder, anteckningar och kompendier där (PDF, Word, PowerPoint, text eller bilder).
+- Formler läses in från Words och PowerPoints formelverktyg och visas uppställda i frågor och förklaringar. Tabeller och talaranteckningar i PowerPoint kommer också med.
+- Bilder, diagram, skannade sidor och PDF-sidor med figurer eller formler kan läsas av en AI-modell som ser bilder (*Läs bilderna* på tentans sida). Det görs en gång per bild och sparas.
 - Beskriv tentans upplägg (frågetyper, poäng, minuspoäng, tid, vitsordsskala), eller klistra in lärarens information och låt AI:n fylla i det.
 - Snabbövning med nya frågor varje gång, provtenta med tid och vitsord, AI-rättning av kortsvar, räkneuppgifter och essäer, repetition av missade frågor och statistik per ämnesområde.
 
@@ -37,6 +39,7 @@ Ungefär så mycket går åt i appen:
 | Rätta ett kortsvar eller en essä | 1 |
 | Provtenta med 50 flervalsfrågor | 4–5 |
 | Dela in materialet i ämnesområden / fylla i upplägget | 1 vardera |
+| Läsa in bilder (görs en gång) | 1 per upp till 4 bilder |
 
 50 anrop per dag räcker alltså till ungefär 30–40 omgångar snabbövning, eller några provtentor plus övning.
 
@@ -57,7 +60,7 @@ Får du meddelandet *Gränsen är nådd*, eller tycker att frågorna blir för d
 |---|---|
 | Kursmaterial | I tentans mapp på datorn (dina egna filer – appen bara läser dem) |
 | Upplägg, ämnesområden, statistik, missade frågor | `tentquiz.json` i tentans mapp |
-| Utläst text från filerna (cache) | `tentquiz-text.json` i tentans mapp |
+| Utläst text från filerna och beskrivningar av bilderna (cache) | `tentquiz-text.json` i tentans mapp |
 | Listan över tentor och API-nyckeln | I webbläsaren |
 
 Mappfunktionen kräver Chrome eller Edge på dator. I andra webbläsare (Safari, Firefox, telefon) sparas tentorna i webbläsaren i stället och man laddar upp filerna.
@@ -66,4 +69,4 @@ Materialet skickas till OpenRouter och den valda modellens leverantör när frå
 
 ## Teknik
 
-En enda statisk HTML-fil utan byggsteg. Bibliotek laddas från cdnjs vid behov: pdf.js (PDF), mammoth (Word) och JSZip (PowerPoint). AI-anrop går direkt från webbläsaren till OpenRouters API.
+En enda statisk HTML-fil utan byggsteg. Bibliotek laddas från cdnjs vid behov: pdf.js (PDF), JSZip (Word och PowerPoint, inklusive formler och bilder), mammoth (reserv för Word) och KaTeX (visar formler). AI-anrop går direkt från webbläsaren till OpenRouters API.

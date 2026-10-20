@@ -145,12 +145,16 @@ const PDF_LIB = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.
 const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const MAMMOTH = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+const KATEX_JS = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js";
+const KATEX_AUTO = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js";
+const KATEX_CSS = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css";
 const OR_URL = "https://openrouter.ai/api/v1";
-const VERSION = "1.5 · 20.10.2026";
+const VERSION = "1.6 · 20.10.2026";
 const DEFAULT_MODEL = "";
 const PROMPT_MATERIAL = 120000;
 const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
-const MAT_RE = /\.(pdf|docx|pptx|txt|md)$/i;
+const MAT_RE = /\.(pdf|docx|pptx|txt|md|png|jpe?g|gif|webp|bmp)$/i;
+const CACHE_V = 2;
 const HAS_FS = typeof window.showDirectoryPicker === "function";
 
 const TYPES = {
@@ -311,7 +315,8 @@ async function loadMaterial() {
   S.loading = "Läser materialet…"; if (S.view === "course") render();
   let files = [];
   try { files = await listFiles(c); } catch (e) { S.banner = "Kunde inte läsa mappen. Har den flyttats eller tagits bort?"; S.loading = false; S.material = []; return render(); }
-  const cache = (await readJSON(c, CACHE_FILE)) || {files:{}};
+  let cache = await readJSON(c, CACHE_FILE);
+  if (!cache || cache.v !== CACHE_V) cache = {v:CACHE_V, files:{}, desc:(cache && cache.desc) || {}};
   const fresh = {}, errs = [];
   let changed = false, i = 0;
   for (const f of files) {
@@ -319,14 +324,20 @@ async function loadMaterial() {
     const key = f.name + "|" + f.size + "|" + f.lastModified;
     if (cache.files[key]) { fresh[key] = cache.files[key]; continue; }
     S.loading = `Läser ${f.name} (${i} av ${files.length})…`; if (S.view === "course") render();
-    try { const text = (await extract(await f.get(), f.name)).trim(); fresh[key] = {name:f.name, text}; if (text.length < 20) errs.push(f.name + " (ingen text – är det en skannad bild?)"); }
-    catch (e) { console.warn(e); errs.push(f.name); fresh[key] = {name:f.name, text:"", failed:true}; }
+    try {
+      const r = await extract(await f.get(), f.name, key), text = (r.text || "").trim();
+      fresh[key] = {name:f.name, text, imgs:(r.imgs || []).map(x => ({id:x.id, ref:x.ref}))};
+      if (stripImgs(text).trim().length < 20 && !fresh[key].imgs.length) errs.push(f.name + " (ingen text)");
+    } catch (e) { console.warn(e); errs.push(f.name); fresh[key] = {name:f.name, text:"", imgs:[], failed:true}; }
     changed = true;
   }
   if (Object.keys(cache.files).some(k => !fresh[k])) changed = true;
-  if (changed) await writeJSON(c, CACHE_FILE, {files:fresh});
+  const used = new Set(Object.values(fresh).flatMap(m => (m.imgs || []).map(x => x.id)));
+  const desc = {}; for (const id of Object.keys(cache.desc || {})) if (used.has(id)) desc[id] = cache.desc[id];
+  if (changed || Object.keys(desc).length !== Object.keys(cache.desc || {}).length) await writeJSON(c, CACHE_FILE, {v:CACHE_V, files:fresh, desc});
+  S.desc = desc; S.matFiles = files; S.matCache = fresh;
   S.material = Object.values(fresh).filter(m => m.text);
-  S.matInfo = {files:files.map(f => ({name:f.name, chars:(fresh[f.name + "|" + f.size + "|" + f.lastModified] || {}).text?.length || 0})), key:Object.keys(fresh).sort().join(";"), errs};
+  S.matInfo = {files:files.map(f => { const m = fresh[f.name + "|" + f.size + "|" + f.lastModified] || {}; return {name:f.name, chars:withImgs(m.text || "").length, imgs:(m.imgs || []).length}; }), key:Object.keys(fresh).sort().join(";"), errs};
   if (errs.length) S.banner = "Kunde inte läsa text ur: " + errs.join(", ");
   S.loading = false;
   if (S.view === "course" || S.view === "edit") render();
@@ -342,19 +353,178 @@ function loadScript(src) {
     document.head.appendChild(s);
   });
 }
-async function extract(f, name) {
-  const n = (name || f.name || "").toLowerCase();
-  if (n.endsWith(".pdf")) return pdfText(f);
-  if (n.endsWith(".docx")) { await loadScript(MAMMOTH); return (await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value; }
-  if (n.endsWith(".pptx")) return pptxText(f);
-  return f.text();
+function loadCss(href) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`link[data-href="${href}"]`)) return res();
+    const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; l.dataset.href = href; l.onload = res; l.onerror = rej;
+    document.head.appendChild(l);
+  });
 }
-async function pdfText(f) {
+// ---------- formler: allt som står inom \( … \) eller \[ … \] visas som uppställda formler (KaTeX)
+const MATH_RE = /\\\(|\\\[|\$\$/;
+let mathLoad = null, mathT = null;
+const mathObs = new MutationObserver(() => { clearTimeout(mathT); mathT = setTimeout(typeset, 60); });
+const watchMath = () => mathObs.observe(app, {childList:true, subtree:true, characterData:true});
+function typeset() {
+  if (!MATH_RE.test(app.textContent)) return;
+  mathLoad = mathLoad || Promise.all([loadCss(KATEX_CSS), loadScript(KATEX_JS)]).then(() => loadScript(KATEX_AUTO));
+  mathLoad.then(() => {
+    mathObs.disconnect();
+    try {
+      window.renderMathInElement(app, {throwOnError:false, delimiters:[{left:"\\[", right:"\\]", display:true}, {left:"$$", right:"$$", display:true}, {left:"\\(", right:"\\)", display:false}],
+        ignoredTags:["script", "noscript", "style", "textarea", "pre", "code", "option", "select", "input"]});
+    } catch (e) { console.warn(e); }
+    watchMath();
+  }, () => { mathLoad = null; });
+}
+watchMath();
+
+// ---------- filer till text (formler blir LaTeX, bilder blir markeringar [[BILD:id]] som läses separat)
+const NS_M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const NS_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+const NS_V = "urn:schemas-microsoft-com:vml";
+const IMG_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const MIN_IMG_BYTES = 3000;
+const kids = el => Array.from(el.childNodes).filter(n => n.nodeType === 1);
+const kid = (el, name) => el && kids(el).find(n => n.localName === name && n.namespaceURI === NS_M);
+const mval = el => el ? (el.getAttributeNS(NS_M, "val") ?? el.getAttribute("m:val")) : null;
+const xml = s => new DOMParser().parseFromString(s, "application/xml");
+const hex = buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+const sha = async data => hex(await crypto.subtle.digest("SHA-256", data)).slice(0, 20);
+
+// OMML (Words och PowerPoints formelverktyg) → LaTeX
+const TEX_CHARS = {"×":"\\times ","÷":"\\div ","·":"\\cdot ","⋅":"\\cdot ","≤":"\\le ","≥":"\\ge ","≠":"\\ne ","≈":"\\approx ","±":"\\pm ","∓":"\\mp ","∞":"\\infty ","→":"\\to ","←":"\\leftarrow ","⇒":"\\Rightarrow ","⇔":"\\Leftrightarrow ","∈":"\\in ","∉":"\\notin ","⊂":"\\subset ","⊆":"\\subseteq ","∪":"\\cup ","∩":"\\cap ","∀":"\\forall ","∃":"\\exists ","∂":"\\partial ","∇":"\\nabla ","∆":"\\Delta ","Δ":"\\Delta ","∑":"\\sum ","∏":"\\prod ","∫":"\\int ","√":"\\sqrt ","−":"-","…":"\\ldots ","⋯":"\\cdots ","′":"'",
+  "α":"\\alpha ","β":"\\beta ","γ":"\\gamma ","δ":"\\delta ","ε":"\\varepsilon ","ϵ":"\\epsilon ","ζ":"\\zeta ","η":"\\eta ","θ":"\\theta ","ι":"\\iota ","κ":"\\kappa ","λ":"\\lambda ","μ":"\\mu ","ν":"\\nu ","ξ":"\\xi ","π":"\\pi ","ρ":"\\rho ","σ":"\\sigma ","τ":"\\tau ","υ":"\\upsilon ","φ":"\\varphi ","ϕ":"\\phi ","χ":"\\chi ","ψ":"\\psi ","ω":"\\omega ","Γ":"\\Gamma ","Θ":"\\Theta ","Λ":"\\Lambda ","Ξ":"\\Xi ","Π":"\\Pi ","Σ":"\\Sigma ","Φ":"\\Phi ","Ψ":"\\Psi ","Ω":"\\Omega ",
+  "%":"\\%","#":"\\#","&":"\\&","$":"\\$","_":"\\_","{":"\\{","}":"\\}","\\":"\\backslash "};
+const TEX_FUNCS = /^(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|sinh|cosh|tanh|ln|log|lg|exp|lim|max|min|sup|inf|det|arg|deg|gcd|Pr)$/;
+const texText = t => TEX_FUNCS.test(t) ? "\\" + t + " " : /^[A-Za-zÅÄÖåäö]{4,}$/.test(t) ? "\\text{" + t + "}" : Array.from(t).map(ch => TEX_CHARS[ch] ?? ch).join("");
+const NARY = {"∑":"\\sum","∏":"\\prod","∐":"\\coprod","∫":"\\int","∬":"\\iint","∭":"\\iiint","∮":"\\oint","⋃":"\\bigcup","⋂":"\\bigcap"};
+const DELIM = {"(":"(",")":")","[":"[","]":"]","{":"\\{","}":"\\}","|":"|","‖":"\\|","⟨":"\\langle","⟩":"\\rangle","⌈":"\\lceil","⌉":"\\rceil","⌊":"\\lfloor","⌋":"\\rfloor","":"."};
+const ACC = {"̂":"\\hat","̃":"\\tilde","̄":"\\bar","̇":"\\dot","̈":"\\ddot","⃗":"\\vec","̌":"\\check","́":"\\acute","̀":"\\grave","̆":"\\breve"};
+function omml(el) {
+  if (!el) return "";
+  if (el.namespaceURI === NS_MC && el.localName === "AlternateContent") { const ch = kids(el).find(n => n.localName === "Choice"); return ch ? omml(ch) : ""; }
+  const g = n => omml(kid(el, n)), all = () => kids(el).map(omml).join("");
+  const pr = kid(el, el.localName + "Pr"), prv = n => mval(kid(pr, n));
+  switch (el.namespaceURI === NS_M ? el.localName : "") {
+    case "r": { const t = kids(el).filter(n => n.localName === "t").map(n => n.textContent).join(""); return t ? texText(t) : ""; }
+    case "f": return prv("type") === "lin" ? g("num") + "/" + g("den") : "\\frac{" + g("num") + "}{" + g("den") + "}";
+    case "sSup": return "{" + g("e") + "}^{" + g("sup") + "}";
+    case "sSub": return "{" + g("e") + "}_{" + g("sub") + "}";
+    case "sSubSup": return "{" + g("e") + "}_{" + g("sub") + "}^{" + g("sup") + "}";
+    case "sPre": return "{}_{" + g("sub") + "}^{" + g("sup") + "}{" + g("e") + "}";
+    case "rad": { const deg = g("deg"); return (deg && prv("degHide") !== "1" && prv("degHide") !== "on" ? "\\sqrt[" + deg + "]{" : "\\sqrt{") + g("e") + "}"; }
+    case "nary": { const ch = prv("chr") || "∫", sub = g("sub"), sup = g("sup"); return (NARY[ch] || texText(ch)) + (sub ? "_{" + sub + "}" : "") + (sup ? "^{" + sup + "}" : "") + " " + g("e"); }
+    case "d": { const b = prv("begChr") ?? "(", e = prv("endChr") ?? ")", sep = prv("sepChr") ?? "|"; const es = kids(el).filter(n => n.localName === "e").map(omml); return "\\left" + (DELIM[b] ?? b) + es.join(" " + (DELIM[sep] ?? sep) + " ") + "\\right" + (DELIM[e] ?? e); }
+    case "func": return g("fName") + "{" + g("e") + "}";
+    case "limLow": return "{" + g("e") + "}_{" + g("lim") + "}";
+    case "limUpp": return "{" + g("e") + "}^{" + g("lim") + "}";
+    case "acc": return (ACC[prv("chr") || "̂"] || "\\hat") + "{" + g("e") + "}";
+    case "bar": return (prv("pos") === "bot" ? "\\underline{" : "\\overline{") + g("e") + "}";
+    case "groupChr": return (prv("pos") === "top" ? "\\overbrace{" : "\\underbrace{") + g("e") + "}";
+    case "eqArr": return "\\begin{aligned}" + kids(el).filter(n => n.localName === "e").map(n => omml(n).replace(/&/g, "")).join(" \\\\ ") + "\\end{aligned}";
+    case "m": return "\\begin{matrix}" + kids(el).filter(n => n.localName === "mr").map(r => kids(r).filter(n => n.localName === "e").map(omml).join(" & ")).join(" \\\\ ") + "\\end{matrix}";
+    case "phant": return "";
+    case "t": return texText(el.textContent);
+    default: return /Pr$/.test(el.localName) ? "" : all();
+  }
+}
+const ommlInline = el => "\\(" + omml(el).replace(/\s+/g, " ").trim() + "\\)";
+const ommlBlock = el => "\n\\[" + kids(el).filter(n => n.localName === "oMath").map(n => omml(n).replace(/\s+/g, " ").trim()).join(" \\\\ ") + "\\]\n";
+
+// Gemensam vandring genom Word- och PowerPoint-XML
+function walkOOXML(node, out, onImg) {
+  for (const el of kids(node)) {
+    const ns = el.namespaceURI, n = el.localName;
+    if (ns === NS_MC && n === "AlternateContent") { const ch = kids(el).find(x => x.localName === "Choice"); if (ch) walkOOXML(ch, out, onImg); continue; }
+    if (ns === NS_M && n === "oMathPara") { out.push(ommlBlock(el)); continue; }
+    if (ns === NS_M && n === "oMath") { out.push(ommlInline(el)); continue; }
+    if ((ns === NS_W || ns === NS_A) && n === "t") { out.push(el.textContent); continue; }
+    if (ns === NS_W && (n === "instrText" || n === "delText")) continue;
+    if (ns === NS_W && n === "tab") { out.push("\t"); continue; }
+    if ((ns === NS_W && (n === "br" || n === "cr")) || (ns === NS_A && n === "br")) { out.push("\n"); continue; }
+    if (ns === NS_A && n === "blip") { const id = el.getAttributeNS(NS_R, "embed") || el.getAttribute("r:embed"); if (id) out.push(onImg(id)); continue; }
+    if (ns === NS_V && n === "imagedata") { const id = el.getAttributeNS(NS_R, "id") || el.getAttribute("r:id"); if (id) out.push(onImg(id)); continue; }
+    if ((ns === NS_W && n === "tbl") || (ns === NS_A && n === "tbl")) {
+      const rows = kids(el).filter(r => r.localName === "tr").map(r => kids(r).filter(c => c.localName === "tc").map(c => { const o = []; walkOOXML(c, o, onImg); return o.join("").replace(/\s*\n\s*/g, " ").trim(); }).join(" | "));
+      out.push("\n" + rows.join("\n") + "\n"); continue;
+    }
+    walkOOXML(el, out, onImg);
+    if (n === "p" && (ns === NS_W || ns === NS_A)) out.push("\n");
+  }
+}
+async function rels(zip, path) {
+  const dir = path.replace(/[^/]*$/, ""), relPath = dir + "_rels/" + path.split("/").pop() + ".rels";
+  const f = zip.file(relPath); if (!f) return {};
+  const map = {};
+  for (const r of xml(await f.async("string")).getElementsByTagName("Relationship")) {
+    const t = r.getAttribute("Target") || "", parts = (/^\//.test(t) ? t.slice(1) : dir + t).split("/"), res = [];
+    for (const p of parts) { if (p === "..") res.pop(); else if (p !== ".") res.push(p); }
+    map[r.getAttribute("Id")] = {path:res.join("/"), type:(r.getAttribute("Type") || "").split("/").pop(), external:r.getAttribute("TargetMode") === "External"};
+  }
+  return map;
+}
+// Bild inuti en zip (Word/PowerPoint): ger ett id baserat på innehållet, så samma bild bara läses en gång
+async function zipImg(zip, rel, imgs) {
+  if (!rel || rel.external || !IMG_RE.test(rel.path)) return null;
+  const f = zip.file(rel.path); if (!f) return null;
+  const data = await f.async("uint8array"); if (data.length < MIN_IMG_BYTES) return null;
+  const id = "h" + await sha(data);
+  if (!imgs.some(x => x.id === id)) imgs.push({id, ref:rel.path, uses:0});
+  imgs.find(x => x.id === id).uses++;
+  return id;
+}
+async function ooxmlParts(zip, path, imgs) {
+  const r = await rels(zip, path), pending = [];
+  const out = []; walkOOXML(xml(await zip.file(path).async("string")).documentElement, out, rid => { const tok = "\u0000" + pending.length + "\u0000"; pending.push(rid); return tok; });
+  let text = out.join("");
+  for (let i = 0; i < pending.length; i++) { const id = await zipImg(zip, r[pending[i]], imgs); text = text.replace("\u0000" + i + "\u0000", id ? "\n[[BILD:" + id + "]]\n" : ""); }
+  return {text, rels:r};
+}
+const tidy = t => t.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+// Bilder som finns på nästan varje sida eller bild (logotyper, bakgrunder) tas bort
+function dropDecor(text, imgs, units) {
+  const decor = new Set(imgs.filter(x => units >= 4 && x.uses >= 3 && x.uses >= units * 0.4).map(x => x.id));
+  return {text:text.replace(/\n?\[\[BILD:([^\]]+)\]\]\n?/g, (m, id) => decor.has(id) ? "\n" : m), imgs:imgs.filter(x => !decor.has(x.id))};
+}
+async function docxText(f) {
+  await loadScript(JSZIP);
+  const zip = await window.JSZip.loadAsync(await f.arrayBuffer()), imgs = [];
+  const main = await ooxmlParts(zip, "word/document.xml", imgs);
+  let text = main.text;
+  const fn = Object.values(main.rels).find(r => r.type === "footnotes");
+  if (fn && zip.file(fn.path)) { const t = tidy((await ooxmlParts(zip, fn.path, imgs)).text); if (t) text += "\n\nFotnoter:\n" + t; }
+  return {text:tidy(text), imgs};
+}
+async function pptxText(f) {
+  await loadScript(JSZIP);
+  const zip = await window.JSZip.loadAsync(await f.arrayBuffer()), imgs = [];
+  const slides = Object.keys(zip.files).filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+  const out = [];
+  for (let i = 0; i < slides.length; i++) {
+    const s = await ooxmlParts(zip, slides[i], imgs);
+    let t = tidy(s.text);
+    const nr = Object.values(s.rels).find(r => r.type === "notesSlide");
+    if (nr && zip.file(nr.path)) {
+      const o = []; walkOOXML(xml(await zip.file(nr.path).async("string")).documentElement, o, () => "");
+      const notes = tidy(o.join("")).replace(/^\d+\s*$/m, "").trim();
+      if (notes) t += "\nTalaranteckningar: " + notes;
+    }
+    if (t) out.push("[Sida " + (i + 1) + "]\n" + t);
+  }
+  return dropDecor(out.join("\n\n"), imgs, slides.length);
+}
+async function pdfText(f, fileKey) {
   await loadScript(PDF_WORKER); await loadScript(PDF_LIB);
   const doc = await window.pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer()), isEvalSupported:false, disableFontFace:true}).promise;
-  const pages = [];
+  const OPS = window.pdfjsLib.OPS, IMG_OPS = new Set([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintJpegXObject].filter(x => x !== undefined));
+  const pages = [], sigCount = {};
   for (let p = 1; p <= doc.numPages; p++) {
-    const tc = await (await doc.getPage(p)).getTextContent();
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
     let s = "", lastY = null;
     for (const it of tc.items) {
       if (!("str" in it)) continue;
@@ -362,22 +532,115 @@ async function pdfText(f) {
       if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) s += "\n"; else if (s && !/\s$/.test(s) && it.str && !/^\s/.test(it.str)) s += " ";
       s += it.str; if (it.hasEOL) s += "\n"; lastY = y;
     }
-    pages.push(s.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim());
+    s = s.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+    // Vilka bilder ritas på sidan? Storleken används för att känna igen logotyper som återkommer på varje sida
+    const sigs = new Set(); let anyImg = false;
+    try {
+      const ol = await page.getOperatorList();
+      ol.fnArray.forEach((fn, k) => { if (!IMG_OPS.has(fn)) return; anyImg = true; const a = ol.argsArray[k] || []; const w = a[1] || (a[0] && a[0].width) || 0, h = a[2] || (a[0] && a[0].height) || 0; if (w * h >= 40000 && w >= 120 && h >= 80) sigs.add(w + "x" + h); });
+    } catch (_) {}
+    sigs.forEach(x => sigCount[x] = (sigCount[x] || 0) + 1);
+    const math = (s.match(/[∑∫√∂≤≥±∞∏∆√≈≠πσμλαβγθ]/g) || []).length;
+    pages.push({p, s, sigs, anyImg, math});
+    page.cleanup();
   }
-  return pages.filter(Boolean).join("\n\n");
+  const n = doc.numPages, decor = new Set(Object.keys(sigCount).filter(x => n >= 4 && sigCount[x] >= 3 && sigCount[x] >= n * 0.4));
+  const imgs = [];
+  const text = pages.map(pg => {
+    const figure = [...pg.sigs].some(x => !decor.has(x)), scanned = pg.s.length < 40 && pg.anyImg;
+    let t = pg.s;
+    // Hela sidan läses som bild om den har en figur, är skannad eller har formler som inte går att läsa som text
+    if (figure || scanned || pg.math >= 4) { const id = fileKey + "#p" + pg.p; imgs.push({id, ref:"page:" + pg.p + (scanned ? ":scan" : "")}); t += "\n[[BILD:" + id + "]]"; }
+    return t;
+  }).filter(Boolean).join("\n\n");
+  await doc.destroy();
+  return {text, imgs};
 }
-async function pptxText(f) {
-  await loadScript(JSZIP);
-  const zip = await window.JSZip.loadAsync(await f.arrayBuffer());
-  const slides = Object.keys(zip.files).filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
-  const dec = s => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-  const out = [];
-  for (const k of slides) {
-    const xml = await zip.file(k).async("string");
-    const paras = xml.split(/<\/a:p>/).map(p => [...p.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => dec(m[1])).join("")).filter(t => t.trim());
-    if (paras.length) out.push(paras.join("\n"));
+async function extract(f, name, fileKey) {
+  const n = (name || f.name || "").toLowerCase();
+  if (n.endsWith(".pdf")) return pdfText(f, fileKey);
+  if (n.endsWith(".docx")) { try { return await docxText(f); } catch (e) { console.warn(e); await loadScript(MAMMOTH); return {text:(await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value, imgs:[]}; } }
+  if (n.endsWith(".pptx")) return pptxText(f);
+  if (IMG_RE.test(n)) { const id = "h" + await sha(await f.arrayBuffer()); return {text:"[[BILD:" + id + "]]", imgs:[{id, ref:"self"}]}; }
+  return {text:await f.text(), imgs:[]};
+}
+
+// ---------- bilder: görs om till text en gång med en modell som ser bilder, sparas i tentquiz-text.json
+const IMG_BATCH = 4, IMG_MAX = 1600;
+async function toDataURL(source, w, h) {
+  const k = Math.min(1, IMG_MAX / Math.max(w, h)), cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+  const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(source, 0, 0, cv.width, cv.height);
+  return cv.toDataURL("image/jpeg", 0.85);
+}
+// Hämtar bilden som data-URL, eller null om den är för liten för att innehålla något
+async function imgData(x, file, ctx) {
+  if (x.ref.startsWith("page:")) {
+    if (!ctx.pdf) { await loadScript(PDF_WORKER); await loadScript(PDF_LIB); ctx.pdf = await window.pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer()), isEvalSupported:false}).promise; }
+    const page = await ctx.pdf.getPage(parseInt(x.ref.split(":")[1], 10));
+    const v1 = page.getViewport({scale:1}), vp = page.getViewport({scale:Math.min(2.5, 1400 / v1.width)});
+    const cv = document.createElement("canvas"); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    await page.render({canvasContext:cv.getContext("2d"), viewport:vp, background:"#fff"}).promise;
+    return cv.toDataURL("image/jpeg", 0.85);
   }
-  return out.join("\n\n");
+  let blob = file;
+  if (x.ref !== "self") { if (!ctx.zip) { await loadScript(JSZIP); ctx.zip = await window.JSZip.loadAsync(await file.arrayBuffer()); } const f = ctx.zip.file(x.ref); if (!f) return null; blob = await f.async("blob"); }
+  const bm = await createImageBitmap(blob);
+  if (bm.width < 120 || bm.height < 80) return null;
+  return toDataURL(bm, bm.width, bm.height);
+}
+const imgLabel = x => x.ref.startsWith("page:") ? (x.ref.endsWith(":scan") ? "en skannad sida (sida " + x.ref.split(":")[1] + ") – skriv av all text" : "en hel PDF-sida (sida " + x.ref.split(":")[1] + "). Texten på sidan finns redan – skriv bara av formler och tabeller och beskriv figurer") : "en bild";
+async function describeImgs(batch, urls, signal) {
+  const prompt =
+`Du får ${urls.length} ${urls.length === 1 ? "bild" : "bilder"} ur kursmaterialet för universitetskursen "${S.state.name}". De ska användas för att skapa tentafrågor, så beskriv innehållet så att någon som inte ser bilden kan plugga på det:
+- Skriv av text, siffror och rubriker.
+- Tabeller: en rad per rad, med | mellan cellerna.
+- Formler i LaTeX inom \\( … \\) eller \\[ … \\].
+- Diagram och figurer: vad som visas, axlar, trender, samband och viktiga värden.
+- Hoppa över dekoration. Saknar bilden studieinnehåll (logotyp, porträtt, stämningsbild) ska beskrivningen vara en tom sträng.
+
+${batch.map((x, k) => `Bild ${k + 1} är ${imgLabel(x)} ur filen ${x.name}.`).join("\n")}
+
+Skriv på samma språk som texten i bilden (svenska om bilden saknar text).
+Svara med ENDAST en JSON-array med exakt ${urls.length} strängar i samma ordning som bilderna. I JSON måste varje backslash skrivas dubbelt.`;
+  const r = await ask(prompt, {json:true, signal, model:getImgModel(), images:urls});
+  const arr = Array.isArray(r) ? r : r && Array.isArray(r.descriptions) ? r.descriptions : r && typeof r === "object" ? Object.values(r) : null;
+  if (!arr) throw {code:"invalid_json"};
+  return arr.map(v => String(v ?? "").trim());
+}
+const imgCalls = list => { const n = {}; list.forEach(x => n[x.key] = (n[x.key] || 0) + 1); return Object.values(n).reduce((s, k) => s + Math.ceil(k / IMG_BATCH), 0); };
+async function readImages() {
+  const c = S.course, todo = pendingImgs(), fresh = S.matCache, desc = S.desc, mfiles = S.matFiles || [];
+  if (!todo.length || S.imgJob) return;
+  if (!getImgModel()) { S.banner = "Välj en modell som ser bilder under Inställningar."; return render(); }
+  const ctrl = new AbortController();
+  S.imgJob = {done:0, total:todo.length, ctrl}; render();
+  const byFile = {}; for (const x of todo) (byFile[x.key] = byFile[x.key] || []).push(x);
+  let err = null;
+  try {
+    for (const [key, list] of Object.entries(byFile)) {
+      const fobj = mfiles.find(f => f.name + "|" + f.size + "|" + f.lastModified === key); if (!fobj) continue;
+      const file = await fobj.get(), ctx = {};
+      for (let i = 0; i < list.length; i += IMG_BATCH) {
+        const batch = [], urls = [];
+        for (const x of list.slice(i, i + IMG_BATCH)) {
+          let u = null; try { u = await imgData(x, file, ctx); } catch (e) { console.warn(e); }
+          if (u) { batch.push(x); urls.push(u); } else desc[x.id] = "";
+        }
+        if (urls.length) { const d = await describeImgs(batch, urls, ctrl.signal); batch.forEach((x, k) => desc[x.id] = d[k] || ""); }
+        S.imgJob.done = Math.min(S.imgJob.total, S.imgJob.done + list.slice(i, i + IMG_BATCH).length);
+        await writeJSON(c, CACHE_FILE, {v:CACHE_V, files:fresh, desc});
+        if (S.view === "course" && S.course === c) render();
+      }
+      if (ctx.pdf) ctx.pdf.destroy();
+    }
+  } catch (e) { err = e; }
+  if (S.imgJob && S.imgJob.ctrl === ctrl) S.imgJob = null;
+  if (S.course !== c) return;
+  if (err && err.code !== "cancelled") S.banner = "Alla bilder kunde inte läsas: " + errText(err) + (err.code === "rate_limited" ? "" : " Det som hann läsas är sparat – försök igen senare.");
+  else if (!err) S.banner = "Bilderna är lästa. Innehållet används nu när frågor skapas.";
+  S.matInfo.files.forEach(f => { const m = Object.entries(S.matCache).find(([k]) => k.startsWith(f.name + "|")); if (m) f.chars = withImgs(m[1].text).length; });
+  if (S.view === "course") render();
 }
 
 // ---------- AI via OpenRouter
@@ -418,6 +681,8 @@ async function orCallback() {
   } catch (e) { return {text:"Kunde inte hämta nyckeln från OpenRouter: " + (e.message || "okänt fel") + ". Försök igen.", err:true}; }
 }
 const getModel = () => ls.get("tp.model") || DEFAULT_MODEL;
+// Modell för att läsa bilder: en egen vald bildmodell, annars huvudmodellen om den ser bilder
+const getImgModel = () => ls.get("tp.imgmodel") || (ls.get("tp.modelimg") === "1" ? getModel() : "");
 const restricted = msg => /agentic|only available (on|in|to)|not available for this (app|client)|openrouter\.ai\/apps/i.test(msg || "");
 const badModels = () => { try { return JSON.parse(ls.get("tp.badmodels") || "[]"); } catch (_) { return []; } };
 const markBad = id => ls.set("tp.badmodels", JSON.stringify([...new Set(badModels().concat(id))].slice(-100)));
@@ -429,14 +694,14 @@ async function ask(prompt, opts = {}) {
     throw e;
   }
 }
-async function askRaw(prompt, {json = false, onText, signal, model} = {}) {
+async function askRaw(prompt, {json = false, onText, signal, model, images} = {}) {
   const key = getKey(); if (!key) throw {code:"no_key"};
   if (!model && !getModel()) throw {code:"no_model"};
   let res;
   try {
     res = await fetch(OR_URL + "/chat/completions", {method:"POST", signal,
       headers:{"Authorization":"Bearer " + key, "Content-Type":"application/json", "X-Title":"Tentquiz"},
-      body:JSON.stringify({model:model || getModel(), stream:true, messages:[{role:"user", content:prompt}]})});
+      body:JSON.stringify({model:model || getModel(), stream:true, messages:[{role:"user", content:images && images.length ? [{type:"text", text:prompt}, ...images.map(url => ({type:"image_url", image_url:{url}}))] : prompt}]})});
   } catch (e) { if (e && e.name === "AbortError") throw {code:"cancelled"}; throw {code:"network"}; }
   if (!res.ok) {
     let msg = ""; try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (_) {}
@@ -466,15 +731,38 @@ async function askRaw(prompt, {json = false, onText, signal, model} = {}) {
   const v = looseJSON(text); if (v === undefined) throw {code:"invalid_json", text};
   return v;
 }
+// Modeller glömmer ofta att dubbla backslash i LaTeX inuti JSON ("\frac" blir annars ett osynligt tecken + "rac")
+const TEXCMD = /^(frac|forall|beta|bar\b|binom|begin|bigl|bigr|big\b|bmatrix|boldsymbol|bf\b|neq|nabla|not\b|nu\b|ne\b|newline|rho|right|rangle|rceil|rfloor|rm\b|times|theta|tau\b|text|tfrac|to\b|top\b|tilde|therefore|triangle|underline|underbrace|uparrow|upsilon)/;
+function fixJSON(s) {
+  let o = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]; if (ch !== "\\") { o += ch; continue; }
+    const c = s[i + 1];
+    if (c === undefined) { o += "\\\\"; continue; }
+    if (c === '"' || c === "\\" || c === "/") { o += ch + c; i++; continue; }
+    if ("bfnrtu".includes(c)) { const rest = s.slice(i + 1, i + 16); if (c === "u" && /^u[0-9a-fA-F]{4}/.test(rest)) { o += ch; continue; } o += TEXCMD.test(rest) ? "\\\\" : ch; continue; }
+    o += "\\\\";
+  }
+  return o;
+}
+const parseJSON = t => { try { return JSON.parse(fixJSON(t)); } catch (_) { return JSON.parse(t); } };
 function looseJSON(t) {
   const tries = [t.trim()];
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (fence) tries.push(fence[1].trim());
   const a = t.search(/[\[{]/), b = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]")); if (a >= 0 && b > a) tries.push(t.slice(a, b + 1));
-  for (const s of tries) { try { return JSON.parse(s); } catch (_) {} }
+  for (const s of tries) { try { return parseJSON(s); } catch (_) {} }
   return undefined;
 }
+const stripImgs = t => String(t || "").replace(/\[\[BILD:[^\]]+\]\]/g, "");
+const withImgs = t => String(t || "").replace(/\[\[BILD:([^\]]+)\]\]/g, (m, id) => S.desc && S.desc[id] ? "[Figur: " + S.desc[id] + "]" : "");
+// Bilder i materialet som inte lästs än (samma bild räknas en gång)
+function pendingImgs() {
+  const out = [], seen = new Set();
+  for (const [key, m] of Object.entries(S.matCache || {})) for (const x of m.imgs || []) if (!(S.desc && x.id in S.desc) && !seen.has(x.id)) { seen.add(x.id); out.push({...x, key, name:m.name}); }
+  return out;
+}
 function materialText(max = PROMPT_MATERIAL) {
-  const full = (S.material || []).map(m => "### " + m.name + "\n" + m.text).join("\n\n");
+  const full = (S.material || []).map(m => "### " + m.name + "\n" + withImgs(m.text).replace(/\n{3,}/g, "\n\n")).join("\n\n");
   if (full.length <= max) return full;
   const start = Math.floor(Math.random() * (full.length - max));
   return "[Slumpat utdrag ur ett längre material]\n" + full.slice(start, start + max);
@@ -483,6 +771,7 @@ function formatText(c) {
   const parts = (c.parts || []).map(p => TYPES[p.type] ? `- ${p.count} st ${TYPES[p.type].label}` + (TYPES[p.type].closed ? ` (rätt +${fmtP(p.plus)} p, fel −${fmtP(p.minus)} p)` : ` (max ${fmtP(p.points)} p per fråga)`) : "").join("\n");
   return (parts || "- okänt") + (c.minutes ? `\nSkrivtid: ${c.minutes} min` : "") + (c.scale ? `\nVitsordsskala: ${c.scale}` : "");
 }
+const MATH_RULE = 'FORMLER: Skriv matematiska formler och uttryck i LaTeX, inom \\( … \\) i löptext och \\[ … \\] på egen rad. Använd aldrig $ för formler ($ betyder dollar). I JSON måste varje backslash skrivas dubbelt, t.ex. "\\\\frac{a}{b}". Vanliga tal och belopp skrivs som vanlig text.';
 const SHAPES = {
   mc: '{"type":"mc","topic":"...","q":"frågan","options":["A","B","C","D"],"correct":0,"explanation":"varför rätt svar är rätt och var i materialet det står"}',
   multi: '{"type":"multi","topic":"...","q":"frågan (ange att flera kan vara rätt)","options":["A","B","C","D","E"],"correct":[0,3],"explanation":"..."}',
@@ -527,6 +816,7 @@ Krav:
 - Sant/falskt: ungefär hälften sanna och hälften falska påståenden.
 - Öppna frågor (short, calc, essay) ska kunna besvaras med hjälp av materialet. Räkneuppgifter ska ha alla siffror som behövs och ett entydigt svar.
 - Förklaringar ska vara korta (1–3 meningar).
+- ${MATH_RULE}
 
 SVARSFORMAT: Ett JSON-objekt per rad (JSON Lines), inget annat: ingen inledning, inga kodblock, ingen numrering.
 ${types.map(t => t + ": " + SHAPES[t]).join("\n")}
@@ -542,7 +832,7 @@ ${langRule("frågor, svarsalternativ, förklaringar och modellsvar")} Värdet i 
 function parseQ(line) {
   line = String(line || "").trim().replace(/^```\w*/, "").replace(/```$/, "").replace(/,\s*$/, "").trim();
   if (!line.startsWith("{")) return null;
-  let o; try { o = JSON.parse(line); } catch (_) { return null; }
+  let o; try { o = parseJSON(line); } catch (_) { return null; }
   if (!o || !TYPES[o.type] || typeof o.q !== "string" || !o.q.trim()) return null;
   const q = {id:rid(), type:o.type, topic:String(o.topic || "Övrigt").slice(0, 80), q:o.q.trim(), explanation:String(o.explanation || "")};
   if (o.type === "mc" || o.type === "multi") {
@@ -585,6 +875,7 @@ ${answer}
 >>>
 
 ${langRule("feedback och mönstersvar")}
+${MATH_RULE}
 Svara med ENDAST ett JSON-objekt:
 {"points": poäng mellan 0 och ${max} (halva poäng går bra), "feedback": "2–4 meningar om vad som var bra och vad som saknades", "good": ["det som var rätt"], "missing": ["det som saknades eller var fel"], "model": "ett kort mönstersvar"}`;
   const r = await ask(prompt, {json:true, signal}) || {};
@@ -693,7 +984,7 @@ function renderHome() {
       return `<button class="course" data-id="${esc(c.id)}"><span class="row between"><span class="t">${esc(m.name || c.name)}</span>${d !== null ? `<span class="pill${d >= 0 && d <= 7 ? " soon" : ""}">${d > 1 ? d + " dagar kvar" : d === 1 ? "I morgon" : d === 0 ? "I dag" : "Har varit"}</span>` : ""}</span>
       <span class="muted small">${c.kind === "fs" ? "Mapp: " + esc(c.handle.name) : "Sparad i webbläsaren"}${!c.ok ? " · tryck för att ge åtkomst" : ""}${pr.answered ? " · " + pr.answered + " besvarade, " + Math.round(100 * pr.correct / pr.answered) + " % rätt" : ""}</span></button>`; }).join("")}</div>`
   : `<div class="card"><h2>Kom igång</h2>
-    <p>Varje tenta har en egen mapp på datorn. Lägg föreläsningsbilder, anteckningar och kompendier i mappen (PDF, Word, PowerPoint eller text). Appen läser allt i mappen och skapar övningsfrågor i samma stil som tentan.</p>
+    <p>Varje tenta har en egen mapp på datorn. Lägg föreläsningsbilder, anteckningar och kompendier i mappen (PDF, Word, PowerPoint, text eller bilder). Appen läser allt i mappen och skapar övningsfrågor i samma stil som tentan.</p>
     <ul class="small muted" style="margin:0;padding-left:1.2em"><li>Flerval, sant/falskt, kortsvar, räkneuppgifter och essäer</li><li>Provtenta med tid, minuspoäng och vitsord</li><li>Rättning och feedback på öppna svar</li><li>Repetition av det du missat och statistik per ämne</li></ul>
     <p class="small muted">Appen sparar inställningar och statistik i filen <code>tentquiz.json</code> i varje tentamapp.</p></div>`}
   <div class="actions">${HAS_FS ? `<button class="btn" id="addfs">Lägg till tentamapp</button>` : ""}<button class="btn ${HAS_FS ? "quiet" : ""}" id="addlocal">${HAS_FS ? "Ny tenta utan mapp" : "Ny tenta"}</button></div>
@@ -748,6 +1039,7 @@ function renderSettings() {
   <div class="card"><h2>Modell</h2>
     <p class="small muted">Börja gärna med en gratismodell (slutar på <code>:free</code>). De är begränsade till 50 anrop per dag utan köpta krediter och kan ibland vara överbelastade. Räcker det inte, välj en billig betalmodell. Starkare modeller ger bättre frågor och essärättning men kostar mer.</p>
     <p>Vald modell: <b>${model ? esc(model) : "ingen ännu"}</b></p>
+    <p class="small">Modell för bilder: <b>${getImgModel() ? esc(getImgModel()) : "ingen"}</b>${getImgModel() && !ls.get("tp.imgmodel") ? " (samma som ovan)" : ""}${ls.get("tp.imgmodel") ? ` <button class="link small muted" id="resetimg">Återställ</button>` : ""}<br><span class="muted">Används bara när bilder, figurer och skannade sidor i materialet läses in. ${getImgModel() ? "" : "Välj en modell märkt Ser bilder – med Använd för bilder om du vill behålla din vanliga modell."}</span></p>
     <label class="row" style="flex-direction:row;font-weight:600"><input id="freeonly" type="checkbox"${ls.get("tp.freeonly") !== "0" ? " checked" : ""}> Visa bara gratismodeller</label>
     <div id="mlist">${models ? "" : `<p class="muted small"><span class="spin"></span> Hämtar modeller från OpenRouter…</p>`}</div>
     <details><summary class="small" style="cursor:pointer">Skriv in modellens id själv</summary>
@@ -773,6 +1065,7 @@ function renderSettings() {
   });
   on("savemodel", "click", () => { const v = byId("model").value.trim(); ls.set("tp.model", v || null); S.settingsMsg = {text:v ? "Modellen är sparad: " + v : "Ingen modell vald."}; render(); });
   on("freeonly", "change", ev => { ls.set("tp.freeonly", ev.target.checked ? "1" : "0"); showModels(); });
+  on("resetimg", "click", () => { ls.set("tp.imgmodel", null); S.settingsMsg = {text:"Bilder läses nu med samma modell som allt annat" + (getImgModel() ? "." : ", men den modellen ser inte bilder.")}; render(); });
   if (S.models) showModels();
   else if (!S.modelsLoading) {
     S.modelsLoading = true;
@@ -780,7 +1073,9 @@ function renderSettings() {
       S.models = (d.data || []).filter(m => { const a = m.architecture || {}, o = a.output_modalities, i = a.input_modalities; return (!o || (o.includes("text") && o.length === 1)) && (!i || i.includes("text")) && (!a.modality || /->text$/.test(a.modality)); }).map(m => { const a = m.architecture || {}, sp = m.supported_parameters || []; return {id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6,
         img:(a.input_modalities || []).includes("image") || /image/.test((a.modality || "").split("->")[0]), think:sp.includes("reasoning") || sp.includes("include_reasoning"), json:sp.includes("structured_outputs") || sp.includes("response_format"), created:m.created || 0}; })
         .sort((a, b) => (a.inp + a.out) - (b.inp + b.out) || b.ctx - a.ctx);
-      if (S.view === "settings") showModels();
+      // Äldre val saknar uppgift om huvudmodellen ser bilder – fyll i den nu
+      if (ls.get("tp.modelimg") === null && getModel()) { const m = S.models.find(x => x.id === getModel()); if (m) ls.set("tp.modelimg", m.img ? "1" : "0"); }
+      if (S.view === "settings") render();
     }).catch(() => { const box = byId("mlist"); if (box) box.innerHTML = `<p class="notice err">Kunde inte hämta modellistan från OpenRouter. Skriv in modellens id själv nedan.</p>`; })
       .finally(() => { S.modelsLoading = false; });
   }
@@ -813,22 +1108,31 @@ function showModels() {
   // Samma modell kan vara bäst för flera mål – visa den då en gång med alla mål
   const recs = [];
   if (!f) for (const pu of PURPOSES) { const m = bestFor(all, pu), r = m && recs.find(x => x.m && x.m.id === m.id); if (r) r.pus.push(pu); else recs.push({m, pus:[pu]}); }
-  const recHtml = recs.length ? `<div class="rec"><h3>Bäst för</h3><ul class="files">${recs.map(({m, pus}) => `<li><span class="mrow"><span class="small"><b>${esc(pus.map(pu => pu.label).join(" · "))}</b></span>${m ? `<span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span><span class="small muted">${esc(pus.map(pu => pu.why).join(", "))}</span>` : `<span class="small muted">Ingen ${freeOnly ? "gratis" : ""}modell i listan klarar det just nu.</span>`}</span></li>`).join("")}</ul>
-    <p class="muted small">Förslagen bygger på vad OpenRouter uppger att modellerna klarar (hur mycket text de kan läsa, om de tänker innan de svarar, om de ser bilder), inte på testad kvalitet. Appen använder en modell till allt, så vill du bara välja en: ta den för frågor.</p></div>` : "";
+  const recHtml = recs.length ? `<div class="rec"><h3>Bäst för</h3><ul class="files">${recs.map(({m, pus}) => `<li><span class="mrow"><span class="small"><b>${esc(pus.map(pu => pu.label).join(" · "))}</b></span>${m ? `<span class="nm"><button class="link" data-mid="${esc(m.id)}" data-roles="${pus.some(pu => pu.id !== "img") ? "main" : ""}${pus.some(pu => pu.id === "img") ? (pus.some(pu => pu.id !== "img") ? ",img" : "img") : ""}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : m.id === getImgModel() ? " ✓ bilder" : ""}</span><span class="small muted">${esc(pus.map(pu => pu.why).join(", "))}</span>` : `<span class="small muted">Ingen ${freeOnly ? "gratis" : ""}modell i listan klarar det just nu.</span>`}</span></li>`).join("")}</ul>
+    <p class="muted small">Förslagen bygger på vad OpenRouter uppger att modellerna klarar (hur mycket text de kan läsa, om de tänker innan de svarar, om de ser bilder), inte på testad kvalitet. Appen använder en modell till frågor och rättning och kan ha en egen modell för att läsa bilder.</p></div>` : "";
   box.innerHTML = `${recHtml}<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
-  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="mrow"><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span>${modelTags(m)}</span><span class="muted small" style="white-space:nowrap">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
+  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="mrow"><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span>${modelTags(m)}${m.img ? `<button class="link" style="font-size:.85rem" data-mi="${esc(m.id)}">${m.id === getImgModel() ? "✓ Används för bilder" : "Använd för bilder"}</button>` : ""}</span><span class="muted small" style="white-space:nowrap">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
   <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material. När du väljer en modell testas den direkt${freeOnly ? " (räknas som ett av dina gratisanrop)" : ""}. Modeller som inte fungerar göms.</p>
   ${bad.length ? `<p class="small"><button class="link muted" id="unhide">Visa ${bad.length} gömda ${bad.length === 1 ? "modell" : "modeller"} igen</button></p>` : ""}`;
   const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };
   box.querySelectorAll("[data-m]").forEach(b => b.onclick = () => testModel(b.dataset.m));
   on("unhide", "click", () => { ls.set("tp.badmodels", null); showModels(); });
+  box.querySelectorAll("[data-mi]").forEach(b => b.onclick = () => testModel(b.dataset.mi, ["img"]));
+  box.querySelectorAll("[data-roles]").forEach(b => b.onclick = () => testModel(b.dataset.mid, b.dataset.roles.split(",")));
 }
-async function testModel(id) {
+// En liten röd testbild för att se att modellen verkligen kan läsa bilder
+function testImage() { const cv = document.createElement("canvas"); cv.width = cv.height = 64; const g = cv.getContext("2d"); g.fillStyle = "#d22"; g.fillRect(0, 0, 64, 64); return cv.toDataURL("image/png"); }
+async function testModel(id, roles = ["main"]) {
   if (!getKey()) { S.settingsMsg = {text:"Spara din OpenRouter-nyckel först.", err:true}; return render(); }
+  const info = (S.models || []).find(m => m.id === id) || {}, wantImg = roles.includes("img");
   S.settingsMsg = {text:"Testar " + id + "…", busy:true}; render(); top();
   try {
-    await ask("Svara bara med ordet OK.", {model:id});
-    ls.set("tp.model", id); S.settingsMsg = {text:"Modellen fungerar och är vald: " + id};
+    if (wantImg) await ask("Vilken färg har bilden? Svara med ett ord.", {model:id, images:[testImage()]});
+    else await ask("Svara bara med ordet OK.", {model:id});
+    const done = [];
+    if (roles.includes("main")) { ls.set("tp.model", id); ls.set("tp.modelimg", info.img ? "1" : "0"); done.push("frågor och rättning"); }
+    if (wantImg) { ls.set("tp.imgmodel", roles.includes("main") ? null : id); if (roles.includes("main")) ls.set("tp.modelimg", "1"); done.push("bilder"); }
+    S.settingsMsg = {text:"Modellen fungerar och används nu för " + done.join(" och ") + ": " + id};
   } catch (e) {
     if (e.code === "model_restricted" || e.code === "bad_model") { markBad(id); S.settingsMsg = {text:(e.code === "model_restricted" ? "Den här modellen får bara användas i vissa utvalda appar och fungerar inte i Tentquiz." : "Modellen svarar inte som den ska.") + " Den är nu gömd – välj en annan.", err:true}; }
     else S.settingsMsg = {text:"Testet misslyckades: " + errText(e) + " Modellen valdes inte.", err:true};
@@ -872,7 +1176,7 @@ function renderEdit() {
     ${course.kind === "fs" ? `<p class="muted small">Allt i mappen <b>${esc(course.handle.name)}</b> används: PDF, Word (.docx), PowerPoint (.pptx) och textfiler, även i undermappar. Lägg till eller ta bort filer direkt i mappen och tryck på Läs in mappen igen.</p>`
       : `<p class="muted small">PDF, Word (.docx), PowerPoint (.pptx) eller textfiler. Filerna sparas i den här webbläsaren.</p>`}
     ${S.loading ? `<p class="muted small"><span class="spin"></span> ${esc(S.loading)}</p>` : mi && mi.files.length ? `<ul class="files">${mi.files.map(f => `<li><span class="nm">${esc(f.name)}</span><span class="row" style="flex-wrap:nowrap"><span class="muted small">${f.chars ? fmtChars(f.chars) : "ingen text"}</span>${course.kind === "local" ? `<button class="link muted" data-rmf="${esc(f.name)}">Ta bort</button>` : ""}</span></li>`).join("")}</ul>` : `<p class="muted small">Inget material ännu.</p>`}
-    <div class="actions"><label class="btn ghost" style="flex-direction:row;justify-content:center;cursor:pointer">${course.kind === "fs" ? "Kopiera filer till mappen" : "Lägg till filer"}<input id="f-files" type="file" multiple accept=".pdf,.docx,.pptx,.txt,.md" hidden></label>${course.kind === "fs" ? `<button class="btn quiet" id="rescan">Läs in mappen igen</button>` : ""}</div>
+    <div class="actions"><label class="btn ghost" style="flex-direction:row;justify-content:center;cursor:pointer">${course.kind === "fs" ? "Kopiera filer till mappen" : "Lägg till filer"}<input id="f-files" type="file" multiple accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.bmp" hidden></label>${course.kind === "fs" ? `<button class="btn quiet" id="rescan">Läs in mappen igen</button>` : ""}</div>
   </div>
   <div class="card"><h2>Om tentan</h2>
     <label>Information från läraren<textarea id="f-info" placeholder="Klistra in vad läraren sagt om tentan: frågetyper, antal frågor, poäng, minuspoäng, tid, vitsordsskala, vad som är viktigt…">${esc(c.info)}</textarea></label>
@@ -943,16 +1247,19 @@ function renderCourse() {
   const hasMat = mat && mat.length, key = !!getKey() && !!getModel();
   const canGen = hasMat && key && !S.loading;
   const topicsStale = hasMat && mi && c.topicsKey !== mi.key + "|" + langOf();
+  const pend = mat ? pendingImgs() : [];
   app.innerHTML = `<div class="row between"><button class="link" id="back">← Mina tentor</button><button class="link" id="edit">Inställningar för tentan</button></div>
   <div class="stack" style="gap:6px"><h1>${esc(c.name)}</h1>
   <p class="muted">${d !== null ? (d > 1 ? d + " dagar till tentan" : d === 1 ? "Tentan är i morgon" : d === 0 ? "Tentan är i dag" : "Tentan har varit") + " · " : ""}${totalQ(c)} frågor${maxPoints(c) ? " · max " + fmtP(maxPoints(c)) + " p" : ""}${c.minutes ? " · " + c.minutes + " min" : ""}</p></div>
   ${S.banner ? `<div class="notice">${esc(S.banner)} <button class="link" id="nobanner">Stäng</button></div>` : ""}
   ${S.loading ? `<div class="notice"><span class="spin"></span> ${esc(S.loading)}</div>` : ""}
   ${!key ? `<div class="notice">Lägg in din OpenRouter-nyckel och välj en modell för att skapa frågor. <button class="link" id="gosettings">Inställningar</button></div>` : ""}
-  ${!S.loading && mat && !mat.length ? `<div class="notice">Ingen text hittades i ${course.kind === "fs" ? "mappen" : "tentan"}. ${course.kind === "fs" ? "Lägg PDF-, Word-, PowerPoint- eller textfiler i mappen och tryck " : "Tryck "}<button class="link" id="edit2">${course.kind === "fs" ? "Läs in mappen igen" : "Lägg till material"}</button>.</div>` : ""}
+  ${!S.loading && mat && !mat.length ? `<div class="notice">Ingen text hittades i ${course.kind === "fs" ? "mappen" : "tentan"}. ${course.kind === "fs" ? "Lägg PDF-, Word-, PowerPoint-, text- eller bildfiler i mappen och tryck " : "Tryck "}<button class="link" id="edit2">${course.kind === "fs" ? "Läs in mappen igen" : "Lägg till material"}</button>.</div>` : ""}
   ${!totalQ(c) ? `<div class="notice">Beskriv hur tentan ser ut så blir frågorna mer lika den riktiga tentan. <button class="link" id="edit3">Fyll i upplägget</button></div>` : ""}
   ${topicsStale && key && !S.analyzing ? `<div class="notice">Materialet har ändrats. Låt AI:n dela in det i ämnesområden, så får du statistik per område och kan öva på det du är svag på. <button class="link" id="analyze">Dela in i ämnesområden</button></div>` : ""}
   ${S.analyzing ? `<div class="notice"><span class="spin"></span> Delar in materialet i ämnesområden…</div>` : ""}
+  ${S.imgJob ? `<div class="notice"><span class="spin"></span> Läser bilder ${S.imgJob.done} av ${S.imgJob.total}… <button class="link" id="stopimg">Avbryt</button></div>`
+    : !S.loading && pend.length ? `<div class="notice">Materialet har ${pend.length} ${pend.length === 1 ? "bild eller sida med figurer" : "bilder och sidor med figurer, tabeller eller formler"} som inte lästs än. Läs in dem så kommer innehållet med i frågorna${getImgModel() ? ` (ungefär ${imgCalls(pend)} anrop till ${esc(getImgModel())})` : ""}. ${getImgModel() ? `<button class="link" id="readimg"${key ? "" : " disabled"}>Läs bilderna</button>` : `<button class="link" id="gosettings2">Välj en modell som ser bilder</button>`}</div>` : ""}
 
   <div class="card"><p class="eyebrow">Övning</p><h2>Snabbövning</h2>
     <p class="muted small">Tio frågor i taget med svar och förklaring direkt. Fortsätt så länge du vill – det blir nya frågor varje gång.</p>
@@ -973,13 +1280,16 @@ function renderCourse() {
     ${ordered.some(x => x.n) ? `<h3>Per ämnesområde</h3><div class="topics">${ordered.map(x => `<div class="topic"><span class="nm">${esc(x.k)}${x.n ? ` <span class="muted small">(${x.n})</span>` : ""}</span><span class="meter">${x.n ? `<span class="${x.acc < .5 ? "low" : x.acc < .75 ? "mid" : ""}" style="width:${Math.round(x.acc * 100)}%"></span>` : ""}</span><button class="link small" data-topic="${esc(x.k)}"${canGen ? "" : " disabled"}>Öva</button></div>`).join("")}</div>` : ""}
     ${sessions.length ? `<h3>Senaste passen</h3><ul class="list">${sessions.map(s => `<li><span class="row between"><span>${esc(s.mode)}</span><span class="muted small">${new Date(s.at).toLocaleDateString("sv-FI")}</span></span><span class="muted small">${s.max ? fmtP(s.pts) + " / " + fmtP(s.max) + " p" : ""}${s.grade ? " · " + esc(s.grade) : ""} · ✓ ${s.r} ✗ ${s.w}${s.s ? " – " + s.s : ""}</span></li>`).join("")}</ul>` : ""}</div>` : ""}
 
-  ${mi && mi.files.length ? `<div class="card"><div class="row between"><h3>Material</h3>${course.kind === "fs" ? `<button class="link small" id="rescan"${S.loading ? " disabled" : ""}>Läs in mappen igen</button>` : ""}</div><ul class="files">${mi.files.map(f => `<li><span class="nm">${esc(f.name)}</span><span class="muted small">${f.chars ? fmtChars(f.chars) : "ingen text"}</span></li>`).join("")}</ul>
+  ${mi && mi.files.length ? `<div class="card"><div class="row between"><h3>Material</h3>${course.kind === "fs" ? `<button class="link small" id="rescan"${S.loading ? " disabled" : ""}>Läs in mappen igen</button>` : ""}</div><ul class="files">${mi.files.map(f => `<li><span class="nm">${esc(f.name)}</span><span class="muted small" style="white-space:nowrap">${f.chars ? fmtChars(f.chars) : "ingen text"}${f.imgs ? " · " + f.imgs + (f.imgs === 1 ? " bild" : " bilder") : ""}</span></li>`).join("")}</ul>
     ${(c.topics || []).length ? `<p class="muted small">Ämnesområden: ${c.topics.map(esc).join(" · ")}</p>` : ""}</div>` : ""}`;
 
   on("back", "click", goHome);
   on("edit", "click", startEdit); on("edit3", "click", startEdit);
   on("edit2", "click", () => course.kind === "fs" ? loadMaterial() : startEdit());
   on("rescan", "click", loadMaterial);
+  on("readimg", "click", readImages);
+  on("stopimg", "click", () => S.imgJob && S.imgJob.ctrl.abort());
+  on("gosettings2", "click", () => { S.view = "settings"; render(); top(); });
   on("gosettings", "click", () => { S.view = "settings"; render(); top(); });
   on("nobanner", "click", () => { S.banner = null; render(); });
   on("analyze", "click", async () => {
@@ -995,7 +1305,7 @@ function renderCourse() {
   on("go-missed", "click", () => startPractice({missed:true}));
   app.querySelectorAll("[data-topic]").forEach(b => b.onclick = () => { pickTopic = b.dataset.topic; startPractice({types:[...pickTypes.set], topic:b.dataset.topic}); });
 }
-async function goHome() { await saveState(); S.course = null; S.state = null; S.material = null; S.matInfo = null; S.banner = null; S.view = "home"; await loadCourses(); render(); top(); }
+async function goHome() { if (S.imgJob) S.imgJob.ctrl.abort(); await saveState(); S.course = null; S.state = null; S.material = null; S.matInfo = null; S.banner = null; S.view = "home"; await loadCourses(); render(); top(); }
 
 // ----- snabbövning
 function batchSpec(types) {
@@ -1289,6 +1599,8 @@ function renderExamResult(E) {
   on("back", "click", () => { S.E = null; S.view = "course"; render(); top(); });
 }
 
+// Testkrok, bara när appen körs lokalt
+if (location.hostname === "localhost") window.__tq = {extract, omml, materialText, S};
 window.addEventListener("pagehide", () => { saveState(); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveState(); });
 window.addEventListener("beforeunload", ev => { if (S.E && S.E.phase === "run") { ev.preventDefault(); ev.returnValue = ""; } });
