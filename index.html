@@ -149,7 +149,7 @@ const KATEX_JS = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.
 const KATEX_AUTO = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js";
 const KATEX_CSS = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css";
 const OR_URL = "https://openrouter.ai/api/v1";
-const VERSION = "1.6 · 20.10.2026";
+const VERSION = "1.7 · 20.10.2026";
 const DEFAULT_MODEL = "";
 const PROMPT_MATERIAL = 120000;
 const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
@@ -1083,14 +1083,23 @@ function renderSettings() {
 let modelFilter = "";
 // Vad modellen passar till, räknat från vad OpenRouter uppger att den klarar (inte testad kvalitet)
 const PURPOSES = [
-  {id:"quiz", label:"Frågor och provtentor", why:"läser mycket material och följer svarsformatet",
+  {id:"quiz", label:"Frågor och provtentor", short:"Frågor och provtentor", why:"läser mycket material och följer svarsformatet",
     ok:m => m.ctx >= 64000, score:m => Math.min(m.ctx, 400000) / 4000 + (m.json ? 40 : 0) + (m.think ? 10 : 0) + m.created / 1e8},
-  {id:"grade", label:"Rättning, räkneuppgifter och essäer", why:"tänker igenom svaret innan den svarar",
+  {id:"grade", label:"Rättning, räkneuppgifter och essäer", short:"Rättning och essäer", why:"tänker igenom svaret innan den svarar",
     ok:m => m.ctx >= 32000, score:m => (m.think ? 100 : 0) + Math.min(m.ctx, 400000) / 8000 + (m.json ? 10 : 0) + m.created / 1e8},
-  {id:"img", label:"Läsa bilder, diagram och formler i bilder", why:"kan se bilder",
+  {id:"img", label:"Läsa bilder, diagram och formler i bilder", short:"Läsa bilder", why:"kan se bilder",
     ok:m => m.img, score:m => 100 + (m.think ? 20 : 0) + Math.min(m.ctx, 400000) / 8000 + m.created / 1e8},
 ];
-const bestFor = (list, pu) => list.filter(pu.ok).sort((a, b) => pu.score(b) - pu.score(a))[0] || null;
+// Genomgången lista (models.json i repot, uppdateras varannan vecka) går före det som räknas fram ur OpenRouters uppgifter
+const cur = m => (S.curated && S.curated.models && S.curated.models[m.id]) || null;
+const goodFor = m => { const c = cur(m); return PURPOSES.filter(pu => c && Array.isArray(c.good) ? c.good.includes(pu.id) && (pu.id !== "img" || m.img) : pu.ok(m)); };
+const bestFor = (list, pu) => list.filter(m => goodFor(m).includes(pu)).sort((a, b) => ((cur(b) && (cur(b).best || []).includes(pu.id)) - (cur(a) && (cur(a).best || []).includes(pu.id))) || pu.score(b) - pu.score(a))[0] || null;
+const goodHtml = m => { const g = goodFor(m), c = cur(m); return (g.length ? `<span class="small"><b>Bra för:</b> ${g.map(pu => esc(pu.short)).join(" · ")}</span>` : `<span class="small muted">Passar dåligt för Tentquiz</span>`) + (c && c.note ? `<span class="small muted">${esc(c.note)}</span>` : ""); };
+function loadCurated() {
+  if (S.curated !== undefined) return;
+  S.curated = null;
+  fetch("models.json", {cache:"no-cache"}).then(r => r.ok ? r.json() : null).then(d => { if (d && d.models) { S.curated = d; if (S.view === "settings") showModels(); } }).catch(() => {});
+}
 function modelTags(m) {
   const t = [];
   t.push([m.ctx >= 100000 ? "Mycket material" : m.ctx >= 64000 ? "Medelmycket material" : "Lite material", m.ctx >= 100000]);
@@ -1100,6 +1109,7 @@ function modelTags(m) {
   return `<span class="tags">${t.map(([x, on]) => `<span class="tag${on ? " on" : ""}">${esc(x)}</span>`).join("")}</span>`;
 }
 function showModels() {
+  loadCurated();
   const box = byId("mlist"); if (!box || !S.models) return;
   const f = modelFilter.toLowerCase(), freeOnly = ls.get("tp.freeonly") !== "0";
   const bad = badModels();
@@ -1108,10 +1118,10 @@ function showModels() {
   // Samma modell kan vara bäst för flera mål – visa den då en gång med alla mål
   const recs = [];
   if (!f) for (const pu of PURPOSES) { const m = bestFor(all, pu), r = m && recs.find(x => x.m && x.m.id === m.id); if (r) r.pus.push(pu); else recs.push({m, pus:[pu]}); }
-  const recHtml = recs.length ? `<div class="rec"><h3>Bäst för</h3><ul class="files">${recs.map(({m, pus}) => `<li><span class="mrow"><span class="small"><b>${esc(pus.map(pu => pu.label).join(" · "))}</b></span>${m ? `<span class="nm"><button class="link" data-mid="${esc(m.id)}" data-roles="${pus.some(pu => pu.id !== "img") ? "main" : ""}${pus.some(pu => pu.id === "img") ? (pus.some(pu => pu.id !== "img") ? ",img" : "img") : ""}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : m.id === getImgModel() ? " ✓ bilder" : ""}</span><span class="small muted">${esc(pus.map(pu => pu.why).join(", "))}</span>` : `<span class="small muted">Ingen ${freeOnly ? "gratis" : ""}modell i listan klarar det just nu.</span>`}</span></li>`).join("")}</ul>
-    <p class="muted small">Förslagen bygger på vad OpenRouter uppger att modellerna klarar (hur mycket text de kan läsa, om de tänker innan de svarar, om de ser bilder), inte på testad kvalitet. Appen använder en modell till frågor och rättning och kan ha en egen modell för att läsa bilder.</p></div>` : "";
+  const recHtml = recs.length ? `<div class="rec"><h3>Rekommenderat</h3><ul class="files">${recs.map(({m, pus}) => `<li><span class="mrow"><span class="small eyebrow">Bäst för ${esc(pus.map(pu => pu.short.toLowerCase()).join(", "))}</span>${m ? `<span class="nm"><button class="link" data-mid="${esc(m.id)}" data-roles="${pus.some(pu => pu.id !== "img") ? "main" : ""}${pus.some(pu => pu.id === "img") ? (pus.some(pu => pu.id !== "img") ? ",img" : "img") : ""}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : m.id === getImgModel() ? " ✓ bilder" : ""}</span>${goodHtml(m)}` : `<span class="small muted">Ingen ${freeOnly ? "gratis" : ""}modell i listan klarar det just nu.</span>`}</span></li>`).join("")}</ul>
+    <p class="muted small">${S.curated && S.curated.updated ? "Genomgånget " + esc(new Date(S.curated.updated + "T12:00:00").toLocaleDateString("sv-FI")) + " utifrån modellernas beskrivningar och jämförelser. Nya modeller som inte gåtts igenom bedöms efter vad OpenRouter uppger att de klarar." : "Bygger på vad OpenRouter uppger att modellerna klarar (hur mycket text de kan läsa, om de tänker innan de svarar, om de ser bilder), inte på testad kvalitet."} Appen använder en modell till frågor och rättning och kan ha en egen modell för att läsa bilder.</p></div>` : "";
   box.innerHTML = `${recHtml}<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
-  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="mrow"><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span>${modelTags(m)}${m.img ? `<button class="link" style="font-size:.85rem" data-mi="${esc(m.id)}">${m.id === getImgModel() ? "✓ Används för bilder" : "Använd för bilder"}</button>` : ""}</span><span class="muted small" style="white-space:nowrap">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
+  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="mrow"><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span>${goodHtml(m)}${modelTags(m)}${m.img ? `<button class="link" style="font-size:.85rem" data-mi="${esc(m.id)}">${m.id === getImgModel() ? "✓ Används för bilder" : "Använd för bilder"}</button>` : ""}</span><span class="muted small" style="white-space:nowrap">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
   <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material. När du väljer en modell testas den direkt${freeOnly ? " (räknas som ett av dina gratisanrop)" : ""}. Modeller som inte fungerar göms.</p>
   ${bad.length ? `<p class="small"><button class="link muted" id="unhide">Visa ${bad.length} gömda ${bad.length === 1 ? "modell" : "modeller"} igen</button></p>` : ""}`;
   const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };

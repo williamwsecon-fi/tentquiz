@@ -1,0 +1,21 @@
+{
+  "updated": "2026-10-20",
+  "about": "Genomgång av gratismodellerna på OpenRouter för Tentquiz. Uppdateras varannan söndag. good = vad modellen duger till (quiz = frågor och provtentor, grade = rättning, räkneuppgifter och essäer, img = läsa bilder). best = där den är förstahandsvalet. note = kort omdöme som visas i appen.",
+  "models": {
+    "minimax/minimax-m3.1-flash:free": {
+      "good": ["quiz", "grade", "img"],
+      "best": ["quiz", "grade"],
+      "note": "Den starkaste gratismodellen just nu. Läser mycket material, ser bilder och tänker igenom svaren. Lite långsammare."
+    },
+    "nvidia/nemotron-3.5-super-vl:free": {
+      "good": ["quiz", "grade", "img"],
+      "best": ["img"],
+      "note": "Byggd för att läsa dokument, tabeller och bilder och är mycket snabb. Bäst för bilder och skannade sidor, och ett bra snabbt val för övning."
+    },
+    "xingchen-agi/xing4.0-29b-a4b:free": {
+      "good": ["quiz"],
+      "best": [],
+      "note": "Liten modell gjord för kod och agenter. Fungerar för enkla övningsfrågor men är svagare på rättning och ser inte bilder."
+    }
+  }
+}
