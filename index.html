@@ -106,6 +106,16 @@ textarea.answer{min-height:160px} textarea.essay{min-height:280px}
 .course:hover{border-color:var(--accent)}
 .course .t{font-family:var(--display);font-weight:600;font-size:1.2rem}
 .pill{display:inline-block;font-size:.8rem;font-weight:700;border-radius:999px;padding:2px 9px;background:var(--chip);color:var(--muted)}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.tag{font-size:.74rem;font-weight:700;border-radius:999px;padding:1px 7px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.tag.on{background:var(--sel-bg);color:var(--accent)}
+.mrow{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:1 1 auto}
+.mrow .nm{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.mrow .link{text-align:left}
+.rec{display:flex;flex-direction:column;gap:8px;margin-bottom:6px}
+.files li:has(.mrow){align-items:flex-start}
+.mrow + .muted{flex:none;text-align:right}
+.rec li{flex-wrap:wrap}
 .pill.soon{background:var(--warn-bg);color:var(--warn)}
 .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .stat{background:var(--bg);border-radius:10px;padding:10px 12px}
@@ -136,7 +146,7 @@ const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.w
 const MAMMOTH = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
 const OR_URL = "https://openrouter.ai/api/v1";
-const VERSION = "1.4 · 20.10.2026";
+const VERSION = "1.5 · 20.10.2026";
 const DEFAULT_MODEL = "";
 const PROMPT_MATERIAL = 120000;
 const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
@@ -767,7 +777,8 @@ function renderSettings() {
   else if (!S.modelsLoading) {
     S.modelsLoading = true;
     fetch(OR_URL + "/models").then(r => r.json()).then(d => {
-      S.models = (d.data || []).filter(m => { const a = m.architecture || {}, o = a.output_modalities, i = a.input_modalities; return (!o || (o.includes("text") && o.length === 1)) && (!i || i.includes("text")) && (!a.modality || /->text$/.test(a.modality)); }).map(m => ({id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6}))
+      S.models = (d.data || []).filter(m => { const a = m.architecture || {}, o = a.output_modalities, i = a.input_modalities; return (!o || (o.includes("text") && o.length === 1)) && (!i || i.includes("text")) && (!a.modality || /->text$/.test(a.modality)); }).map(m => { const a = m.architecture || {}, sp = m.supported_parameters || []; return {id:m.id, name:m.name || m.id, ctx:m.context_length || 0, inp:Number(m.pricing && m.pricing.prompt || 0) * 1e6, out:Number(m.pricing && m.pricing.completion || 0) * 1e6,
+        img:(a.input_modalities || []).includes("image") || /image/.test((a.modality || "").split("->")[0]), think:sp.includes("reasoning") || sp.includes("include_reasoning"), json:sp.includes("structured_outputs") || sp.includes("response_format"), created:m.created || 0}; })
         .sort((a, b) => (a.inp + a.out) - (b.inp + b.out) || b.ctx - a.ctx);
       if (S.view === "settings") showModels();
     }).catch(() => { const box = byId("mlist"); if (box) box.innerHTML = `<p class="notice err">Kunde inte hämta modellistan från OpenRouter. Skriv in modellens id själv nedan.</p>`; })
@@ -775,14 +786,37 @@ function renderSettings() {
   }
 }
 let modelFilter = "";
+// Vad modellen passar till, räknat från vad OpenRouter uppger att den klarar (inte testad kvalitet)
+const PURPOSES = [
+  {id:"quiz", label:"Frågor och provtentor", why:"läser mycket material och följer svarsformatet",
+    ok:m => m.ctx >= 64000, score:m => Math.min(m.ctx, 400000) / 4000 + (m.json ? 40 : 0) + (m.think ? 10 : 0) + m.created / 1e8},
+  {id:"grade", label:"Rättning, räkneuppgifter och essäer", why:"tänker igenom svaret innan den svarar",
+    ok:m => m.ctx >= 32000, score:m => (m.think ? 100 : 0) + Math.min(m.ctx, 400000) / 8000 + (m.json ? 10 : 0) + m.created / 1e8},
+  {id:"img", label:"Läsa bilder, diagram och formler i bilder", why:"kan se bilder",
+    ok:m => m.img, score:m => 100 + (m.think ? 20 : 0) + Math.min(m.ctx, 400000) / 8000 + m.created / 1e8},
+];
+const bestFor = (list, pu) => list.filter(pu.ok).sort((a, b) => pu.score(b) - pu.score(a))[0] || null;
+function modelTags(m) {
+  const t = [];
+  t.push([m.ctx >= 100000 ? "Mycket material" : m.ctx >= 64000 ? "Medelmycket material" : "Lite material", m.ctx >= 100000]);
+  if (m.think) t.push(["Tänker först", true]);
+  if (m.img) t.push(["Ser bilder", true]);
+  if (m.json) t.push(["Stabilt svarsformat", true]);
+  return `<span class="tags">${t.map(([x, on]) => `<span class="tag${on ? " on" : ""}">${esc(x)}</span>`).join("")}</span>`;
+}
 function showModels() {
   const box = byId("mlist"); if (!box || !S.models) return;
   const f = modelFilter.toLowerCase(), freeOnly = ls.get("tp.freeonly") !== "0";
   const bad = badModels();
   const all = S.models.filter(m => (!freeOnly || (!m.inp && !m.out)) && m.ctx >= 32000 && !bad.includes(m.id));
   const list = all.filter(m => !f || m.id.toLowerCase().includes(f) || m.name.toLowerCase().includes(f)).slice(0, 60);
-  box.innerHTML = `<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
-  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span><span class="muted small">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
+  // Samma modell kan vara bäst för flera mål – visa den då en gång med alla mål
+  const recs = [];
+  if (!f) for (const pu of PURPOSES) { const m = bestFor(all, pu), r = m && recs.find(x => x.m && x.m.id === m.id); if (r) r.pus.push(pu); else recs.push({m, pus:[pu]}); }
+  const recHtml = recs.length ? `<div class="rec"><h3>Bäst för</h3><ul class="files">${recs.map(({m, pus}) => `<li><span class="mrow"><span class="small"><b>${esc(pus.map(pu => pu.label).join(" · "))}</b></span>${m ? `<span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span><span class="small muted">${esc(pus.map(pu => pu.why).join(", "))}</span>` : `<span class="small muted">Ingen ${freeOnly ? "gratis" : ""}modell i listan klarar det just nu.</span>`}</span></li>`).join("")}</ul>
+    <p class="muted small">Förslagen bygger på vad OpenRouter uppger att modellerna klarar (hur mycket text de kan läsa, om de tänker innan de svarar, om de ser bilder), inte på testad kvalitet. Appen använder en modell till allt, så vill du bara välja en: ta den för frågor.</p></div>` : "";
+  box.innerHTML = `${recHtml}<label>Sök modell<input id="mfilter" type="text" value="${esc(modelFilter)}" placeholder="t.ex. gemini, llama, deepseek"></label>
+  ${list.length ? `<ul class="files">${list.map(m => `<li><span class="mrow"><span class="nm"><button class="link" data-m="${esc(m.id)}">${esc(m.id)}</button>${m.id === getModel() ? " ✓" : ""}</span>${modelTags(m)}</span><span class="muted small" style="white-space:nowrap">${m.inp || m.out ? "$" + m.inp.toFixed(2) + " / $" + m.out.toFixed(2) : "gratis"} · ${Math.round(m.ctx / 1000)}k</span></li>`).join("")}</ul>` : `<p class="muted small">Inga modeller matchar.</p>`}
   <p class="muted small">${freeOnly ? "Visar gratismodeller. " : "Billigast först. "}Priset är i dollar per miljon tokens in / ut. Den sista siffran är hur mycket text modellen kan läsa åt gången – välj gärna minst 128k om kursen har mycket material. När du väljer en modell testas den direkt${freeOnly ? " (räknas som ett av dina gratisanrop)" : ""}. Modeller som inte fungerar göms.</p>
   ${bad.length ? `<p class="small"><button class="link muted" id="unhide">Visa ${bad.length} gömda ${bad.length === 1 ? "modell" : "modeller"} igen</button></p>` : ""}`;
   const inp = byId("mfilter"); inp.oninput = () => { modelFilter = inp.value; showModels(); const n = byId("mfilter"); n.focus(); n.setSelectionRange(modelFilter.length, modelFilter.length); };
