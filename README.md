@@ -10,13 +10,14 @@
 
 ## Kom igång (gratis)
 
-1. **Skapa ett konto på [OpenRouter](https://openrouter.ai).** Det är gratis och kräver inget kort.
-2. **Skapa en API-nyckel** under [Settings → Keys](https://openrouter.ai/settings/keys). Kopiera den – den visas bara en gång.
-3. **Öppna Tentquiz → Inställningar**, klistra in nyckeln och tryck *Spara nyckeln*.
-4. **Välj en gratismodell** i listan (rutan *Visa bara gratismodeller* är ikryssad från början). Välj gärna en modell som kan läsa minst 128k, så får allt kursmaterial plats.
-5. **Lägg till tentamapp** och välj mappen med ditt kursmaterial. Öppna *Inställningar för tentan* och klistra in vad läraren sagt om tentan.
+1. **Öppna Tentquiz → Inställningar** och tryck *Logga in med OpenRouter*. Har du inget konto skapar du ett där – det är gratis och kräver inget kort.
+2. **Godkänn** att Tentquiz får en nyckel. Du skickas tillbaka till appen och nyckeln sparas automatiskt. (Vill du hellre skapa nyckeln själv under [Settings → Keys](https://openrouter.ai/settings/keys) kan du klistra in den under *Klistra in en nyckel själv i stället*.)
+3. **Välj en gratismodell** i listan (rutan *Visa bara gratismodeller* är ikryssad från början). Välj gärna en modell som kan läsa minst 128k, så får allt kursmaterial plats.
+4. **Lägg till tentamapp** och välj mappen med ditt kursmaterial. Öppna *Inställningar för tentan* och klistra in vad läraren sagt om tentan.
 
 Nyckeln sparas bara i din egen webbläsare och skickas bara till OpenRouter. Var och en som använder appen har sin egen nyckel.
+
+Nyckeln finns kvar tills du loggar ut. Om den ändå försvinner mellan gångerna: använd inte privat fönster, och kontrollera att webbläsaren inte rensar webbplatsdata när den stängs. Varje inloggning skapar en ny nyckel med namnet *Tentquiz* i ditt OpenRouter-konto – gamla kan tas bort under Keys.
 
 ## Vad gratis räcker till
 

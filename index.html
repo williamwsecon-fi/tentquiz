@@ -136,7 +136,7 @@ const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.w
 const MAMMOTH = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
 const OR_URL = "https://openrouter.ai/api/v1";
-const VERSION = "1.3 · 19.10.2026";
+const VERSION = "1.4 · 20.10.2026";
 const DEFAULT_MODEL = "";
 const PROMPT_MATERIAL = 120000;
 const STATE_FILE = "tentquiz.json", CACHE_FILE = "tentquiz-text.json";
@@ -167,8 +167,14 @@ const fmtChars = n => n >= 1000 ? Math.round(n / 1000) + " k tecken" : n + " tec
 const daysTo = d => { if (!d) return null; const t = new Date(d + "T00:00:00"); if (isNaN(t)) return null; const now = new Date(); now.setHours(0,0,0,0); return Math.round((t - now) / 86400000); };
 const ls = {
   get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
-  set: (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} },
+  set: (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); return localStorage.getItem(k) === v; } catch (_) { return false; } },
 };
+const ss = {
+  get: k => { try { return sessionStorage.getItem(k); } catch (_) { return null; } },
+  set: (k, v) => { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (_) {} },
+};
+// Be webbläsaren att inte rensa appens data automatiskt när disken blir full
+const persistStorage = () => { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {} };
 
 function errText(e) {
   const c = e && e.code;
@@ -366,6 +372,41 @@ async function pptxText(f) {
 
 // ---------- AI via OpenRouter
 const getKey = () => ls.get("tp.key") || "";
+const STORE_FAIL = "Webbläsaren tillåter inte att appen sparar något (privat fönster eller blockerad webbplatsdata?), så nyckeln glöms när fliken stängs.";
+function saveKey(v) {
+  const ok = ls.set("tp.key", v || null);
+  if (v) persistStorage();
+  return v ? ok : true;
+}
+
+// ----- Logga in med OpenRouter (OAuth PKCE): appen får en egen nyckel utan att man kopierar något
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const callbackUrl = () => location.origin + location.pathname;
+async function orLogin() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  ss.set("tp.pkce", JSON.stringify({verifier, state}));
+  location.href = "https://openrouter.ai/auth?" + new URLSearchParams({callback_url:callbackUrl(), code_challenge:challenge, code_challenge_method:"S256", key_label:"Tentquiz", state});
+}
+// Körs vid start: tar hand om återkomsten från OpenRouter. Returnerar ett meddelande till inställningssidan, eller null.
+async function orCallback() {
+  const q = new URLSearchParams(location.search);
+  const code = q.get("code"), err = q.get("error");
+  if (!code && !err) return null;
+  history.replaceState(null, "", callbackUrl() + location.hash);
+  let saved = null; try { saved = JSON.parse(ss.get("tp.pkce") || "null"); } catch (_) {}
+  ss.set("tp.pkce", null);
+  if (!code) return {text:"Inloggningen avbröts. Inget har ändrats.", err:true};
+  if (!saved || (q.get("state") && q.get("state") !== saved.state)) return {text:"Inloggningen kunde inte slutföras (öppnades den i en annan flik?). Försök igen.", err:true};
+  try {
+    const r = await fetch(OR_URL + "/auth/keys", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({code, code_verifier:saved.verifier, code_challenge_method:"S256"})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.key) throw new Error((d.error && d.error.message) || "HTTP " + r.status);
+    if (!saveKey(d.key)) return {text:"Inloggad, men " + STORE_FAIL[0].toLowerCase() + STORE_FAIL.slice(1), err:true};
+    return {text:"Inloggad med OpenRouter. Nyckeln är sparad i den här webbläsaren och finns kvar nästa gång du öppnar appen."};
+  } catch (e) { return {text:"Kunde inte hämta nyckeln från OpenRouter: " + (e.message || "okänt fel") + ". Försök igen.", err:true}; }
+}
 const getModel = () => ls.get("tp.model") || DEFAULT_MODEL;
 const restricted = msg => /agentic|only available (on|in|to)|not available for this (app|client)|openrouter\.ai\/apps/i.test(msg || "");
 const badModels = () => { try { return JSON.parse(ls.get("tp.badmodels") || "[]"); } catch (_) { return []; } };
@@ -636,7 +677,7 @@ function renderHome() {
   app.innerHTML = `<div class="row between"><p class="eyebrow">Tentquiz</p><button class="link" id="settings">Inställningar</button></div>
   <h1>Mina tentor</h1>
   ${S.banner ? `<div class="notice">${esc(S.banner)} <button class="link" id="nobanner">Stäng</button></div>` : ""}
-  ${!key || !getModel() ? `<div class="notice">${!key ? "Appen använder din egen nyckel från OpenRouter för att skapa och rätta frågor." : "Välj vilken AI-modell appen ska använda."} <button class="link" id="settings2">${!key ? "Lägg in nyckeln" : "Välj modell"}</button></div>` : ""}
+  ${!key || !getModel() ? `<div class="notice">${!key ? "Appen använder din egen nyckel från OpenRouter för att skapa och rätta frågor." : "Välj vilken AI-modell appen ska använda."} <button class="link" id="settings2">${!key ? "Logga in med OpenRouter" : "Välj modell"}</button></div>` : ""}
   ${S.courses.length ? `<div class="stack">${S.courses.map(c => {
       const m = c.meta || {}, d = daysTo(m.examDate), pr = m.progress || {};
       return `<button class="course" data-id="${esc(c.id)}"><span class="row between"><span class="t">${esc(m.name || c.name)}</span>${d !== null ? `<span class="pill${d >= 0 && d <= 7 ? " soon" : ""}">${d > 1 ? d + " dagar kvar" : d === 1 ? "I morgon" : d === 0 ? "I dag" : "Har varit"}</span>` : ""}</span>
@@ -682,9 +723,17 @@ function renderSettings() {
   app.innerHTML = `<div class="row between"><button class="link" id="back">← Tillbaka</button></div><h1>Inställningar</h1>
   ${S.settingsMsg ? `<div class="notice${S.settingsMsg.err ? " err" : " ok"}" id="smsg" role="status">${S.settingsMsg.busy ? '<span class="spin"></span> ' : ""}${esc(S.settingsMsg.text)}</div>` : ""}
   <div class="card"><h2>OpenRouter</h2>
-    <p class="small muted">Appen skapar och rättar frågor med en AI-modell via <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>. Skapa ett gratis konto och en nyckel under <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">Keys</a> – med gratismodeller behöver du inte betala något. Nyckeln sparas bara i den här webbläsaren.</p>
-    <label>API-nyckel<input id="key" type="password" autocomplete="off" value="${esc(key)}" placeholder="sk-or-…"></label>
-    <div class="actions"><button class="btn" id="savekey">Spara nyckeln</button>${key ? `<button class="btn quiet" id="testkey">Testa nyckeln</button><button class="btn danger" id="delkey">Ta bort</button>` : ""}</div>
+    <p class="small muted">Appen skapar och rättar frågor med en AI-modell via <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>. Ditt OpenRouter-konto är ditt konto i Tentquiz: logga in, så skapar OpenRouter en nyckel åt appen. Kontot är gratis – med gratismodeller behöver du inte betala något.</p>
+    ${key ? `<p><b>✓ Nyckel sparad</b> <span class="muted small">(slutar på …${esc(key.slice(-4))})</span></p>` : ""}
+    <div class="actions"><button class="btn${key ? " quiet" : ""}" id="orlogin">${key ? "Logga in på nytt med OpenRouter" : "Logga in med OpenRouter"}</button>${key ? `<button class="btn quiet" id="testkey">Testa nyckeln</button><button class="btn danger" id="delkey">Logga ut</button>` : ""}</div>
+    <details><summary class="small" style="cursor:pointer">Klistra in en nyckel själv i stället</summary>
+      <form id="keyform" class="stack" style="margin-top:10px" autocomplete="on">
+        <input type="text" name="username" autocomplete="username" value="OpenRouter (Tentquiz)" hidden readonly>
+        <label>API-nyckel<input id="key" name="password" type="password" autocomplete="current-password" value="${esc(key)}" placeholder="sk-or-…"></label>
+        <p class="small muted">Skapa en nyckel under <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">Keys</a>. Låt gärna webbläsaren spara den som lösenord, så fylls den i igen om webbläsarens data rensas.</p>
+        <div class="actions"><button class="btn quiet" type="submit">Spara nyckeln</button></div>
+      </form></details>
+    <p class="small muted">Nyckeln sparas bara i den här webbläsaren och skickas bara till OpenRouter. Försvinner den mellan gångerna? Använd inte privat fönster, och kontrollera att webbläsaren inte är inställd att rensa webbplatsdata när den stängs.</p>
   </div>
   <div class="card"><h2>Modell</h2>
     <p class="small muted">Börja gärna med en gratismodell (slutar på <code>:free</code>). De är begränsade till 50 anrop per dag utan köpta krediter och kan ibland vara överbelastade. Räcker det inte, välj en billig betalmodell. Starkare modeller ger bättre frågor och essärättning men kostar mer.</p>
@@ -697,8 +746,9 @@ function renderSettings() {
   </div>
   <p class="muted small">Tentquiz version ${VERSION}</p>`;
   on("back", "click", () => { S.settingsMsg = null; S.view = "home"; render(); top(); });
-  on("savekey", "click", () => { const v = byId("key").value.trim(); ls.set("tp.key", v || null); S.settingsMsg = {text:v ? "Nyckeln är sparad i den här webbläsaren." : "Nyckeln är borttagen."}; render(); });
-  on("delkey", "click", () => { ls.set("tp.key", null); S.settingsMsg = {text:"Nyckeln är borttagen från den här webbläsaren."}; render(); });
+  on("orlogin", "click", () => { S.settingsMsg = {text:"Skickar dig till OpenRouter…", busy:true}; render(); orLogin().catch(() => { S.settingsMsg = {text:"Kunde inte starta inloggningen i den här webbläsaren. Klistra in nyckeln själv i stället.", err:true}; render(); }); });
+  on("keyform", "submit", ev => { ev.preventDefault(); const v = byId("key").value.trim(); const ok = saveKey(v); S.settingsMsg = !ok ? {text:STORE_FAIL, err:true} : {text:v ? "Nyckeln är sparad i den här webbläsaren." : "Nyckeln är borttagen."}; render(); });
+  on("delkey", "click", () => { saveKey(null); S.settingsMsg = {text:"Utloggad. Nyckeln är borttagen från den här webbläsaren (den finns kvar i ditt OpenRouter-konto under Keys, där du kan ta bort den)."}; render(); });
   on("testkey", "click", async () => {
     S.settingsMsg = {text:"Testar…"}; render();
     try {
@@ -1210,6 +1260,9 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 window.addEventListener("beforeunload", ev => { if (S.E && S.E.phase === "run") { ev.preventDefault(); ev.returnValue = ""; } });
 
 (async () => {
+  const login = await orCallback();
+  if (login) { S.view = "settings"; S.settingsMsg = login; }
+  if (getKey()) persistStorage();
   try { await loadCourses(); } catch (e) { S.banner = "Kunde inte läsa listan över tentor i den här webbläsaren."; }
   render();
 })();
